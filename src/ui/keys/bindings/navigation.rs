@@ -62,6 +62,9 @@ catalog! {
         ESCAPE_ANY_SHIFT: Binding = ESCAPE.ignoring(Modifiers::SHIFT_MASK);
         /// Enter with any modifiers, as confirmation dialogs accept it.
         ENTER_ANY: Binding = ENTER.ignoring(SHORTCUT_MODIFIERS);
+        /// Steps through the names a typed prefix matches while jumping by name.
+        NEXT_NAME: Binding = Binding::ctrl(Key::n);
+        PREVIOUS_NAME: Binding = Binding::ctrl(Key::p);
         /// Enter with or without Shift, as the listing, prompts and popovers accept it.
         ENTER_ANY_SHIFT: Binding = ENTER.ignoring(Modifiers::SHIFT_MASK);
     }
