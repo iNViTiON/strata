@@ -80,6 +80,8 @@ impl Default for Preferences {
             preview_autoplay: false,
             preview_video_start: 0,
             watch_network_folders: true,
+            expanded_preview_style: ExpandedPreviewStyle::default(),
+            expanded_preview_shift_controls: true,
             thumbnail_workers: crate::sandbox::browser::default_worker_limit(),
             show_thumbnails: true,
             stl_thumbnails: false,

@@ -1,0 +1,229 @@
+// SPDX-License-Identifier: MIT
+
+//! The open PDF viewer's zoom and page state, so keys can drive what the
+//! pointer already can: Ctrl+wheel zoom and scrolling.
+
+use super::*;
+
+const TOP_TOLERANCE: f64 = 4.0;
+
+/// How the pages are being rendered: the size and detail of the next request.
+#[derive(Clone, Copy)]
+pub(super) struct PdfRender {
+    pub(super) size: MediaPreviewSize,
+    pub(super) detail: PreviewDetail,
+}
+
+#[derive(Clone)]
+pub(in crate::ui::preview) struct PdfView {
+    scroll: glib::WeakRef<gtk::ScrolledWindow>,
+    viewer: Rc<PdfViewer>,
+    render: Rc<Cell<PdfRender>>,
+    refine: Rc<dyn Fn()>,
+}
+
+/// What re-rendering the open pages needs to share with the viewer.
+pub(super) struct PageRefinement {
+    pub(super) render: Rc<Cell<PdfRender>>,
+    pub(super) next_request: Rc<Cell<u64>>,
+    pub(super) viewer: Rc<PdfViewer>,
+    pub(super) loads: Rc<RefCell<HashMap<i32, LoadHandle>>>,
+}
+
+/// Re-requests every page on screen at the current render detail and swaps
+/// each texture in place, so a page never goes blank while it sharpens.
+pub(super) fn page_refiner(
+    provider: Rc<dyn PreviewProvider>,
+    entry: FileEntry,
+    state: PageRefinement,
+) -> Rc<dyn Fn()> {
+    Rc::new(move || {
+        let visible: Vec<_> = state
+            .viewer
+            .pages
+            .borrow()
+            .iter()
+            .map(|(page, (overlay, picture, area))| {
+                (
+                    *page,
+                    overlay.clone(),
+                    picture.downgrade(),
+                    area.downgrade(),
+                )
+            })
+            .collect();
+        for (page, overlay, picture, area) in visible {
+            let request_id = PreviewRequestId(state.next_request.get());
+            state
+                .next_request
+                .set(state.next_request.get().saturating_add(1));
+            let binding = overlay.widget_name();
+            let weak_overlay = overlay.downgrade();
+            let (viewer, loads) = (state.viewer.clone(), state.loads.clone());
+            let emit = Rc::new(move |event| {
+                let PreviewEvent::Ready(Preview {
+                    request_id: response,
+                    content:
+                        PreviewContent::Pdf {
+                            png,
+                            page: rendered,
+                            text_layer,
+                            ..
+                        },
+                    ..
+                }) = event
+                else {
+                    return;
+                };
+                if response != request_id || rendered != page {
+                    return;
+                }
+                loads.borrow_mut().remove(&page);
+                let Some(overlay) = weak_overlay
+                    .upgrade()
+                    .filter(|overlay| overlay.widget_name() == binding)
+                else {
+                    return;
+                };
+                if let Some(layer) = text_layer {
+                    viewer.layers.borrow_mut().insert(page, layer);
+                    if let Some(area) = area.upgrade() {
+                        area.queue_draw();
+                    }
+                }
+                if let Some(picture) = picture.upgrade() {
+                    set_pdf_page_texture(&overlay, &picture, png, viewer.page_width.get());
+                }
+            });
+            let render = state.render.get();
+            let load = provider.load(
+                PreviewRequest {
+                    id: request_id,
+                    entry: entry.clone(),
+                    text_byte_limit: TEXT_BYTE_LIMIT,
+                    render_document: false,
+                    pdf_page: page,
+                    media_size: render.size,
+                    detail: render.detail,
+                    model_palette: crate::ui::theme::ThemeManager::shared().active_model_palette(),
+                    model_view: Default::default(),
+                    archive_password: None,
+                },
+                emit,
+            );
+            state.loads.borrow_mut().insert(page, load);
+        }
+    })
+}
+
+impl PdfView {
+    pub(super) fn new(
+        scroll: &gtk::ScrolledWindow,
+        viewer: Rc<PdfViewer>,
+        render: Rc<Cell<PdfRender>>,
+        refine: Rc<dyn Fn()>,
+    ) -> Self {
+        let weak = glib::WeakRef::new();
+        weak.set(Some(scroll));
+        Self {
+            scroll: weak,
+            viewer,
+            render,
+            refine,
+        }
+    }
+
+    /// Renders later pages, and sharpens the ones on screen, at `detail`.
+    /// Going back to standard detail leaves the pages as they are.
+    pub(in crate::ui::preview) fn set_detail(&self, detail: PreviewDetail, size: MediaPreviewSize) {
+        if self.render.get().detail == detail {
+            return;
+        }
+        self.render.set(PdfRender { size, detail });
+        if detail.is_expanded() {
+            (self.refine)();
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::ui::preview) fn first_page_texture_width(&self) -> Option<i32> {
+        let pages = self.viewer.pages.borrow();
+        let first = pages.keys().min()?;
+        let (_, picture, _) = pages.get(first)?;
+        Some(picture.paintable()?.intrinsic_width())
+    }
+
+    pub(in crate::ui::preview) fn zoom(&self) -> f64 {
+        self.viewer.zoom.get()
+    }
+
+    /// Sets the zoom, keeping the middle of the view where it is.
+    pub(in crate::ui::preview) fn set_zoom(&self, zoom: f64) -> bool {
+        let Some(scroll) = self.scroll.upgrade() else {
+            return false;
+        };
+        let next = zoom.clamp(PDF_MIN_ZOOM, PDF_MAX_ZOOM);
+        let Some(previous) = self.viewer.set_zoom(&scroll, next) else {
+            return false;
+        };
+        preserve_pdf_view_center(&scroll, next / previous);
+        true
+    }
+
+    pub(in crate::ui::preview) fn reset_zoom(&self) {
+        let Some(scroll) = self.scroll.upgrade() else {
+            return;
+        };
+        self.viewer.set_zoom(&scroll, PDF_MIN_ZOOM);
+        set_adjustment_value(&scroll.hadjustment(), 0.0);
+    }
+
+    /// Scrolls to the top of the next or previous page. `false` when no page
+    /// is laid out yet.
+    pub(in crate::ui::preview) fn turn_page(&self, direction: i32) -> bool {
+        let Some(scroll) = self.scroll.upgrade() else {
+            return false;
+        };
+        let Some(list) = scroll.child() else {
+            return false;
+        };
+        let mut pages: Vec<(f64, f64)> = self
+            .viewer
+            .pages
+            .borrow()
+            .values()
+            .filter_map(|(overlay, ..)| {
+                let bounds = overlay.compute_bounds(&list)?;
+                Some((f64::from(bounds.y()), f64::from(bounds.height())))
+            })
+            .collect();
+        pages.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let gap = f64::from(PDF_PAGE_GAP);
+        let adjustment = scroll.vadjustment();
+        let value = adjustment.value();
+        let target = if direction > 0 {
+            pages
+                .iter()
+                .find(|(top, _)| *top > value + TOP_TOLERANCE)
+                .map(|(top, _)| *top)
+                .or_else(|| pages.last().map(|(top, height)| top + height + gap))
+        } else {
+            let current = pages
+                .iter()
+                .rev()
+                .find(|(top, _)| *top <= value + TOP_TOLERANCE);
+            current.map(|(top, height)| {
+                if value > top + TOP_TOLERANCE {
+                    *top
+                } else {
+                    (top - height - gap).max(0.0)
+                }
+            })
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        set_adjustment_value(&adjustment, target);
+        true
+    }
+}

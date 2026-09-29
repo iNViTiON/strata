@@ -42,7 +42,7 @@ fn render_pdf_page(
     let page = document
         .page(page_index)
         .ok_or_else(|| "Unable to load that PDF page".to_owned())?;
-    let size = PdfRenderSize::new(size.width, size.height);
+    let size = size.normalized();
     let (_, _, max_pixels) = size.image_limits();
     let (page_width, page_height) = page.size();
     if page_width <= 0.0 || page_height <= 0.0 {
@@ -158,6 +158,11 @@ pub(super) fn pdf_render_request(value: &str) -> Result<(i32, PdfRenderSize), St
     let page = page
         .parse::<i32>()
         .map_err(|_| "Invalid PDF preview page".to_owned())?;
+    let (dimensions, expanded) = match dimensions.split_once(':') {
+        Some((dimensions, "e")) => (dimensions, true),
+        Some(_) => return Err("Invalid PDF preview request".to_owned()),
+        None => (dimensions, false),
+    };
     let (width, height) = dimensions
         .split_once('x')
         .ok_or_else(|| "Invalid PDF preview dimensions".to_owned())?;
@@ -166,7 +171,13 @@ pub(super) fn pdf_render_request(value: &str) -> Result<(i32, PdfRenderSize), St
             .parse::<i32>()
             .map_err(|_| "Invalid PDF preview dimensions".to_owned())
     };
-    Ok((page, PdfRenderSize::new(parse(width)?, parse(height)?)))
+    let (width, height) = (parse(width)?, parse(height)?);
+    let size = if expanded {
+        PdfRenderSize::new_expanded(width, height)
+    } else {
+        PdfRenderSize::new(width, height)
+    };
+    Ok((page, size))
 }
 
 fn open_preview_document(input: &Path, output: &Path) -> Result<poppler::Document, String> {

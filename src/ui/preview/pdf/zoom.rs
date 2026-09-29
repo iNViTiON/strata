@@ -75,7 +75,7 @@ pub(super) fn preserve_pdf_view_center(scroll: &gtk::ScrolledWindow, factor: f64
     ));
 }
 
-pub(super) fn set_adjustment_value(adjustment: &gtk::Adjustment, value: f64) {
+pub(in crate::ui::preview) fn set_adjustment_value(adjustment: &gtk::Adjustment, value: f64) {
     let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
     adjustment.set_value(value.clamp(adjustment.lower(), maximum));
 }

@@ -100,6 +100,8 @@ fn all_preference_setters_publish_and_persist_without_duplicate_notifications() 
                 |m| m.set_preview_autoplay(false),
                 |m| m.set_preview_video_start(0),
                 |m| m.set_watch_network_folders(true),
+                |m| m.set_expanded_preview_style(ExpandedPreviewStyle::Overlay),
+                |m| m.set_expanded_preview_shift_controls(true),
                 |m| m.set_thumbnail_workers(3),
                 |m| m.set_show_thumbnails(true),
                 |m| m.set_stl_thumbnails(false),

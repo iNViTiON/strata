@@ -7,7 +7,7 @@ use super::{
     assert_no_argument, assert_validity,
 };
 use crate::sandbox::{
-    DocumentFormat, MediaPreviewBackend, ParseOperation, runtime, sandbox_input_path,
+    DocumentFormat, MediaPreviewBackend, ParseOperation, PdfRenderSize, runtime, sandbox_input_path,
 };
 
 const ISOLATED: &str = "--unshare-all --die-with-parent --new-session --clearenv";
@@ -81,6 +81,25 @@ fn sandbox_command_starts_absolute_bubblewrap() {
         )),
         None => assert_no_argument(&arguments, &["GDK_PIXBUF_MODULE_FILE"]),
     }
+}
+
+#[test]
+fn expanded_previews_pass_their_own_limits_to_the_helper() {
+    let joined = |operation, value| {
+        Sandbox::new("/home/alice/Documents/large.pdf", operation)
+            .value(value)
+            .joined()
+    };
+    let expanded = ParseOperation::PreviewPdf(PdfRenderSize::new_expanded(1_900, 3_200));
+    assert!(
+        joined(expanded, 1)
+            .contains("preview-pdf /input.pdf /output/result.png 1:1900x3200:e software")
+    );
+    assert!(joined(PDF_PREVIEW.clone(), 1).contains("1:640x800 software"));
+    assert!(
+        joined(ParseOperation::PreviewImageExpanded, 0)
+            .contains("preview-image-expanded /input.pdf /output/result.png 0 software")
+    );
 }
 
 #[test]

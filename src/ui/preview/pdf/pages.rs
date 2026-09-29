@@ -8,9 +8,10 @@ pub(super) struct PageLoader {
     pub(super) provider: Rc<dyn PreviewProvider>,
     pub(super) loads: Rc<RefCell<HashMap<i32, LoadHandle>>>,
     pub(super) entry: FileEntry,
-    pub(super) render_size: MediaPreviewSize,
+    pub(super) render: Rc<Cell<view::PdfRender>>,
     pub(super) initial: RefCell<Option<(i32, Vec<u8>)>>,
-    pub(super) next_request: Cell<u64>,
+    pub(super) next_request: Rc<Cell<u64>>,
+    pub(super) refine_loads: Rc<RefCell<HashMap<i32, LoadHandle>>>,
 }
 
 struct PageWidgets {
@@ -157,6 +158,7 @@ impl PageLoader {
             loads_for_event.borrow_mut().remove(&page_index);
             target.receive(event);
         });
+        let render = self.render.get();
         let load = self.provider.load(
             PreviewRequest {
                 id: request_id,
@@ -164,8 +166,8 @@ impl PageLoader {
                 text_byte_limit: TEXT_BYTE_LIMIT,
                 render_document: false,
                 pdf_page: page_index,
-                media_size: self.render_size,
-                detail: Default::default(),
+                media_size: render.size,
+                detail: render.detail,
                 model_palette: super::super::super::theme::ThemeManager::shared()
                     .active_model_palette(),
                 model_view: Default::default(),
@@ -178,6 +180,7 @@ impl PageLoader {
 
     fn unbind(&self, page: i32) {
         self.loads.borrow_mut().remove(&page);
+        self.refine_loads.borrow_mut().remove(&page);
         self.viewer.pages.borrow_mut().remove(&page);
         pdf_drop_unselected_layer(&self.viewer.layers, &self.viewer.ranges, page);
     }

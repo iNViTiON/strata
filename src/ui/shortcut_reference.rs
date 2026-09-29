@@ -365,6 +365,10 @@ fn default_sections(mode: BrowserMode) -> Vec<ReferenceSection> {
             rows: MEDIA.to_vec(),
         },
         ReferenceSection {
+            title: "Expanded preview",
+            rows: EXPANDED.to_vec(),
+        },
+        ReferenceSection {
             title: "Custom actions",
             rows: custom_action_rows(),
         },
@@ -419,6 +423,12 @@ fn tenxer_sections(mode: BrowserMode, chooser: Option<ChooserScope>) -> Vec<Refe
             rows: MEDIA.to_vec(),
         },
     ]);
+    if chooser.is_none() {
+        sections.push(ReferenceSection {
+            title: "Expanded preview",
+            rows: EXPANDED.to_vec(),
+        });
+    }
     let mode_rows = tenxer_mode_rows(mode, chooser.is_some(), &sections);
     let mode_index = sections
         .iter()
@@ -1483,6 +1493,28 @@ fn tenxer_tools(mode: BrowserMode, chooser: Option<ChooserScope>) -> Vec<Shortcu
     shortcuts.extend_from_slice(TENXER_REFERENCE);
     shortcuts
 }
+const EXPANDED: &[Shortcut] = &[
+    row(
+        One(EXPAND_PREVIEW.shown()),
+        "Expand or collapse the preview",
+    ),
+    row(Any(shown![LEFT, UP, DOWN, RIGHT]), "Previous / next file"),
+    row(
+        Any(shown![EXTEND_LEFT, EXTEND_UP, EXTEND_DOWN, EXTEND_RIGHT]),
+        "Seek, scroll, turn pages, or pan",
+    ),
+    row(
+        Any(shown![
+            EXPANDED_ZOOM_IN,
+            EXPANDED_ZOOM_OUT,
+            EXPANDED_ZOOM_FIT
+        ]),
+        "Zoom an image or PDF; fit to the view",
+    ),
+    row(One(SPACE.shown()), "Play / pause, or close the preview"),
+    row(One(ESCAPE.shown()), "Back to the small preview"),
+];
+
 const MEDIA: &[Shortcut] = &[
     row(One(MEDIA_PLAY_PAUSE.shown()), "Play / pause"),
     row(
