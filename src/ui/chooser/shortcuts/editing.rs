@@ -83,6 +83,10 @@ impl ChooserShortcuts {
         .then_some(glib::Propagation::Proceed)
     }
 
+    pub(super) fn jump_to_name(&self, context: &KeyContext<'_>) -> Option<glib::Propagation> {
+        crate::ui::jump_to_name::handle_key(context.view(), &context.preferences, &context.press)
+    }
+
     pub(super) fn context_menu(&self, context: &KeyContext<'_>) -> Option<glib::Propagation> {
         if !context.press.is(CONTEXT_MENU) || context.focus_in_text_or_popover() {
             return None;
