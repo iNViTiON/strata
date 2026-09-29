@@ -190,7 +190,7 @@ impl DecodedMedia {
             let next = match event {
                 Some(Event::Prepared(header)) => self.on_prepared(header)?,
                 Some(Event::Packet(Packet::Frame(frame))) => {
-                    self.on_frame(frame)?;
+                    self.accept_frame(frame)?;
                     Pump::Continue
                 }
                 Some(Event::Packet(Packet::End(duration))) => {
@@ -268,7 +268,9 @@ impl DecodedMedia {
             .filter(|&position| media::seek_tick(position, header.duration_us) > 0)
     }
 
-    fn on_frame(&self, mut frame: Frame) -> Result<(), String> {
+    /// Takes one decoded frame from the active session: audio goes to the
+    /// output, the picture to the presentation queue.
+    fn accept_frame(&self, mut frame: Frame) -> Result<(), String> {
         let imp = self.imp();
         let header = imp.header.get().ok_or("Missing media header")?;
         if let Some(audio) = imp.audio.borrow().as_ref() {

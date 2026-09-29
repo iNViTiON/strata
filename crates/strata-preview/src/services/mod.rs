@@ -24,8 +24,9 @@ pub use model_preview::{ModelEncoding, ModelFormat, ModelMesh, ModelPalette, Mod
 pub use model_preview::{ModelRender, ModelRenderPurpose};
 pub use preview::{
     ArchiveDirectory, ArchiveFileEntry, ArchiveNode, ArchivePreviewTree, MediaPreviewSize,
-    ModelPreviewStage, PdfTextLayer, Preview, PreviewContent, PreviewEvent, PreviewProvider,
-    PreviewRequest, PreviewRequestId, SandboxedMedia, SecretString, archive_preview_tree,
+    ModelPreviewStage, PdfTextLayer, Preview, PreviewContent, PreviewDetail, PreviewEvent,
+    PreviewProvider, PreviewRequest, PreviewRequestId, SandboxedMedia, SecretString,
+    archive_preview_tree,
 };
 pub use preview::{
     INCORRECT_ARCHIVE_PASSWORD, archive_preview_format, bytes_support_named_family, content_family,

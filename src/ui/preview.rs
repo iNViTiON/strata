@@ -17,8 +17,8 @@ use crate::{
     model::{EntryKind, FileEntry, MetadataValue},
     services::{
         ArchivePreviewTree, DocumentLayout, LoadHandle, MediaPreviewSize, PdfTextLayer, Preview,
-        PreviewContent, PreviewEvent, PreviewProvider, PreviewRequest, PreviewRequestId,
-        SecretString,
+        PreviewContent, PreviewDetail, PreviewEvent, PreviewProvider, PreviewRequest,
+        PreviewRequestId, SecretString,
         file_activity::{self, Notice},
         normalize_preview_text,
     },
@@ -72,6 +72,7 @@ mod model;
 mod pdf_ranges_tests;
 mod pdf_text;
 mod player_layout;
+mod presentation;
 mod route;
 mod session;
 pub(super) mod video;
@@ -195,6 +196,7 @@ struct PreviewState {
     media_checks: RefCell<media_content::MediaChecks>,
     split: RefCell<Option<gtk::Paned>>,
     sizing: layout::SplitSizing,
+    presentation: presentation::Listeners,
     current: RefCell<Option<FileEntry>>,
     current_depth: Cell<Option<usize>>,
     pending_show: RefCell<Option<glib::SourceId>>,
