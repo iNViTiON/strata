@@ -53,6 +53,7 @@ mod file_commands;
 pub(in crate::ui) mod find;
 pub(super) mod fly_to_trash;
 mod inline_edit;
+mod jump_to_name;
 mod leftovers;
 mod listing_filter;
 mod listing_search;
@@ -296,6 +297,7 @@ pub(super) struct ViewState {
     preparing_transfers: RefCell<Vec<PreparingTransfer>>,
     drop_active_depths: Cell<Option<(usize, usize)>>,
     find: RefCell<find::FindState>,
+    jump: jump_to_name::JumpState,
     listing_filter: listing_filter::FilterState,
     listing_search: listing_search::SearchState,
     result_selection: result_selection::ResultSelection,
@@ -683,6 +685,7 @@ impl BrowserView {
             preparing_transfers: RefCell::new(Vec::new()),
             drop_active_depths: Cell::new(None),
             find: RefCell::new(find::FindState::default()),
+            jump: jump_to_name::JumpState::new(),
             listing_filter: listing_filter::FilterState::default(),
             listing_search: listing_search::SearchState::default(),
             result_selection: result_selection::ResultSelection::default(),
@@ -710,6 +713,7 @@ impl BrowserView {
         // one is the natural place to begin a marquee that runs into it.
         register_cut_view(&state);
         state.listing_filter.set_owner(&state);
+        jump_to_name::bind(&state, &preferences);
         state.install_input_ownership();
         state.install_column_peek_targets();
         state.install_drag_autoscroll();
