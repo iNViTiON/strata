@@ -26,6 +26,7 @@ mod chooser;
 pub(super) mod chords;
 mod commands;
 mod escape;
+mod expanded;
 mod files;
 mod focus;
 mod items;
@@ -77,7 +78,19 @@ pub(super) fn install_on(
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let weak_browser = Rc::downgrade(&parts.view.browser());
     let preferences = parts.type_to_search.preferences.clone();
-    let dispatcher = Rc::new(Dispatcher::bind(window, sidebar, parts, None));
+    let dispatcher = Dispatcher::bind(window, sidebar, parts, None);
+    dispatcher.preview.enable_expansion();
+    let dispatcher = Rc::new(dispatcher);
+    let weak_dispatcher = Rc::downgrade(&dispatcher);
+    dispatcher
+        .preview
+        .set_expanded_key_handler(move |press| {
+            weak_dispatcher
+                .upgrade()
+                .map_or(Propagation::Proceed, |dispatcher| {
+                    dispatcher.expanded_window_key(press)
+                })
+        });
     submit_prompt_on_activate(&dispatcher, weak_browser.clone());
     let key_root = root.as_ref().downgrade();
     let tab_scoped = !root.as_ref().is::<gtk::Window>();
@@ -525,7 +538,7 @@ fn visible_popover_menu(widget: &gtk::Widget) -> bool {
 fn inside_pdf_scroll(widget: &gtk::Widget) -> bool {
     let mut current = Some(widget.clone());
     while let Some(widget) = current {
-        if widget.has_css_class("preview-pdf-scroll") {
+        if widget.has_css_class("preview-pdf-scroll") || widget.has_css_class("preview-zoom") {
             return true;
         }
         current = widget.parent();
@@ -684,6 +697,9 @@ impl Dispatcher {
             return Propagation::Stop;
         }
         if let Some(result) = self.input_owner(browser, press) {
+            return result;
+        }
+        if let Some(result) = self.expanded_preview(browser, press) {
             return result;
         }
         if let Some(result) = self.tenxer_keys(browser, press) {
