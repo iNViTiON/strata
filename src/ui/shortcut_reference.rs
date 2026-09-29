@@ -208,6 +208,42 @@ const DEFAULT_SETTINGS: &[Binding] = &[
         keys: "Ctrl + B",
     },
     Binding {
+        category: "Expanded preview",
+        action: "Expand or collapse",
+        note: "Works from the file list",
+        keys: "Shift + Space",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Previous / next file",
+        note: "Swaps with Shift when Hold Shift is off",
+        keys: "← ↑ / ↓ →",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Control the preview",
+        note: "Seek, scroll, turn pages, or pan",
+        keys: "Shift + ← ↑ / ↓ →",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Zoom an image or PDF",
+        note: "0 fits",
+        keys: "+ / −",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Play / pause, or close",
+        note: "",
+        keys: "Space",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Back to the small preview",
+        note: "",
+        keys: "Esc",
+    },
+    Binding {
         category: "Application",
         action: "Edit location",
         note: "",
@@ -625,6 +661,42 @@ const TENXER_SETTINGS: &[Binding] = &[
         keys: "Ctrl + Alt + M",
     },
     Binding {
+        category: "Expanded preview",
+        action: "Expand or collapse",
+        note: "Works from the file list",
+        keys: "Shift + Space",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Previous / next file",
+        note: "Swaps with Shift when Hold Shift is off",
+        keys: "← ↑ / ↓ →",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Control the preview",
+        note: "Seek, scroll, turn pages, or pan",
+        keys: "Shift + ← ↑ / ↓ →",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Zoom an image or PDF",
+        note: "0 fits",
+        keys: "+ / −",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Play / pause, or close",
+        note: "",
+        keys: "Space",
+    },
+    Binding {
+        category: "Expanded preview",
+        action: "Back to the small preview",
+        note: "",
+        keys: "Esc",
+    },
+    Binding {
         category: "Application",
         action: "Edit location",
         note: "",
@@ -898,6 +970,10 @@ fn default_sections(mode: BrowserMode) -> Vec<ReferenceSection> {
             title: "Preview media",
             rows: MEDIA.to_vec(),
         },
+        ReferenceSection {
+            title: "Expanded preview",
+            rows: EXPANDED.to_vec(),
+        },
     ]
 }
 
@@ -934,6 +1010,10 @@ fn tenxer_sections(mode: BrowserMode) -> Vec<ReferenceSection> {
         ReferenceSection {
             title: "Preview media",
             rows: MEDIA.to_vec(),
+        },
+        ReferenceSection {
+            title: "Expanded preview",
+            rows: EXPANDED.to_vec(),
         },
     ]
 }
@@ -1198,6 +1278,15 @@ const TENXER_TOOLS: &[(&str, &str)] = &[
         "Close this reference or cancel the current interaction",
     ),
     ("F1 / ~", "Show or hide this reference"),
+];
+
+const EXPANDED: &[(&str, &str)] = &[
+    ("Shift+Space", "Expand or collapse the preview"),
+    ("← ↑ / ↓ →", "Previous / next file"),
+    ("Shift+← ↑ / ↓ →", "Seek, scroll, turn pages, or pan"),
+    ("+ / −", "Zoom an image or PDF; 0 fits"),
+    ("Space", "Play / pause, or close the preview"),
+    ("Escape", "Back to the small preview"),
 ];
 
 const MEDIA: &[(&str, &str)] = &[

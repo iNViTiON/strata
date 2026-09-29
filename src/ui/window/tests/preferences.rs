@@ -4,7 +4,7 @@ use gtk::prelude::*;
 
 use super::*;
 use crate::ui::browser_modes::BrowserMode;
-use crate::ui::preferences::PreferenceManager;
+use crate::ui::preferences::{ExpandedPreviewStyle, PreferenceManager};
 use crate::ui::tenxer_mode::UNUSED_SUBTITLE;
 
 #[test]
@@ -788,4 +788,120 @@ fn walk(widget: &gtk::Widget, visit: &mut impl FnMut(&gtk::Widget)) {
         walk(&widget, visit);
         child = widget.next_sibling();
     }
+}
+
+#[test]
+fn saved_expanded_preview_preferences_apply_before_settings_and_in_every_window() {
+    gtk_test(
+        "ui::window::tests::preferences::saved_expanded_preview_preferences_apply_before_settings_and_in_every_window",
+        || {
+            write_settings(
+                "expanded_preview_style = \"fullscreen\"\nexpanded_preview_shift_controls = false\n",
+            );
+            let manager = PreferenceManager::shared();
+            assert_eq!(
+                manager.expanded_preview_style(),
+                ExpandedPreviewStyle::Fullscreen
+            );
+            let first = OpenWindow::open();
+            let second = OpenWindow::open();
+            assert!(settings_closed(&first) && settings_closed(&second));
+            let directory = tempfile::tempdir().expect("folder fixture");
+            for name in ["a.txt", "b.txt"] {
+                std::fs::write(directory.path().join(name), name).expect("file");
+            }
+            for open in [&first, &second] {
+                open.content
+                    .browser
+                    .navigate_location(crate::model::Location::local(directory.path()));
+                wait_until(|| !column_loading(open, 0));
+            }
+            let none = gtk::gdk::ModifierType::empty();
+            let shift = gtk::gdk::ModifierType::SHIFT_MASK;
+
+            for open in [&first, &second] {
+                start_on_first_file(open);
+                assert!(press(&open.window, gtk::gdk::Key::space, shift));
+                let window = wait_for_expanded_window();
+                assert!(cursor_name(open) == "a.txt");
+                assert!(
+                    press_in(&window, gtk::gdk::Key::Down, shift),
+                    "saved: Shift controls nothing, so Shift+arrows change file"
+                );
+                assert_eq!(cursor_name(open), "b.txt");
+                settle_for(std::time::Duration::from_millis(300));
+                wait_until(|| has_class_below(window.upcast_ref(), "preview-text"));
+                assert!(press_in(&window, gtk::gdk::Key::Up, none));
+                assert_eq!(cursor_name(open), "b.txt", "plain arrows drive the preview");
+                assert!(press_in(&window, gtk::gdk::Key::Escape, none));
+                wait_until(|| expanded_windows().is_empty());
+            }
+
+            manager.set_expanded_preview_style(ExpandedPreviewStyle::Overlay);
+            manager.set_expanded_preview_shift_controls(true);
+            for open in [&second, &first] {
+                start_on_first_file(open);
+                assert!(press(&open.window, gtk::gdk::Key::space, shift));
+                wait_until(|| expanded_layer(open));
+                assert!(expanded_windows().is_empty(), "the overlay style is live");
+                assert!(press(&open.window, gtk::gdk::Key::Down, none));
+                assert_eq!(cursor_name(open), "b.txt", "plain arrows change file again");
+                assert!(press(&open.window, gtk::gdk::Key::Escape, none));
+                wait_until(|| !expanded_layer(open));
+            }
+        },
+    );
+}
+
+fn start_on_first_file(open: &OpenWindow) {
+    open.content.browser.browser().select(0, 0);
+    open.content.browser.browser().focus_active();
+    wait_until(|| open.content.browser.item_view_has_focus());
+}
+
+fn cursor_name(open: &OpenWindow) -> String {
+    open.content
+        .browser
+        .browser()
+        .focused_entry()
+        .map(|entry| entry.display_name)
+        .expect("focused entry")
+}
+
+fn expanded_windows() -> Vec<gtk::Window> {
+    gtk::Window::list_toplevels()
+        .into_iter()
+        .filter_map(|toplevel| toplevel.downcast::<gtk::Window>().ok())
+        .filter(|window| window.has_css_class("expanded-preview-window"))
+        .collect()
+}
+
+fn wait_for_expanded_window() -> gtk::Window {
+    wait_until(|| expanded_windows().len() == 1);
+    expanded_windows().remove(0)
+}
+
+fn has_class_below(root: &gtk::Widget, class: &str) -> bool {
+    let mut found = false;
+    walk(root, &mut |widget| found |= widget.has_css_class(class));
+    found
+}
+
+fn expanded_layer(open: &OpenWindow) -> bool {
+    let mut found = false;
+    walk(open.content.overlay().upcast_ref(), &mut |widget| {
+        found |= widget.has_css_class("expanded-preview-layer");
+    });
+    found
+}
+
+fn press_in(window: &gtk::Window, key: gtk::gdk::Key, modifiers: gtk::gdk::ModifierType) -> bool {
+    let controllers = window.observe_controllers();
+    (0..controllers.n_items())
+        .filter_map(|index| {
+            controllers
+                .item(index)
+                .and_downcast::<gtk::EventControllerKey>()
+        })
+        .any(|keys| keys.emit_by_name::<bool>("key-pressed", &[&key, &0u32, &modifiers]))
 }
