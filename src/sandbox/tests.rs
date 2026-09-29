@@ -18,6 +18,7 @@ const MEDIA_PREVIEW: super::ParseOperation =
 const PDF_PREVIEW: super::ParseOperation = super::ParseOperation::PreviewPdf(PdfRenderSize {
     width: 640,
     height: 800,
+    expanded: false,
 });
 
 use super::{
@@ -193,6 +194,36 @@ fn sandbox_command_starts_absolute_bubblewrap() {
         ),
         None => assert!(!arguments.contains(&std::ffi::OsStr::new("GDK_PIXBUF_MODULE_FILE"))),
     }
+}
+
+#[test]
+fn expanded_previews_pass_their_own_limits_to_the_helper() {
+    let arguments = |operation, value| {
+        sandbox_command(
+            Path::new("/usr/bin/bwrap"),
+            Path::new("/tmp/strata"),
+            Path::new("/home/alice/Documents/large.pdf"),
+            Path::new("/tmp/private-output"),
+            operation,
+            value,
+            MediaPreviewBackend::Software,
+            &[],
+        )
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ")
+    };
+    let expanded = ParseOperation::PreviewPdf(PdfRenderSize::new_expanded(1_900, 3_200));
+    assert!(
+        arguments(expanded, 1)
+            .contains("preview-pdf /input.pdf /output/result.png 1:1900x3200:e software")
+    );
+    assert!(arguments(PDF_PREVIEW.clone(), 1).contains("1:640x800 software"));
+    assert!(
+        arguments(ParseOperation::PreviewImageExpanded, 0)
+            .contains("preview-image-expanded /input.pdf /output/result.png 0 software")
+    );
 }
 
 #[test]
@@ -767,6 +798,19 @@ fn accepts_only_bounded_png_outputs_and_never_compressed_media() {
     assert!(!valid_output(ParseOperation::ThumbnailImage, &png(257, 1)));
     assert!(valid_output(ParseOperation::PreviewImage, &png(800, 800)));
     assert!(!valid_output(ParseOperation::PreviewImage, &png(801, 1)));
+    let edge = crate::sandbox::EXPANDED_IMAGE_EDGE;
+    assert!(valid_output(
+        ParseOperation::PreviewImageExpanded,
+        &png(edge, edge)
+    ));
+    assert!(!valid_output(
+        ParseOperation::PreviewImageExpanded,
+        &png(edge + 1, 1)
+    ));
+    let expanded_pdf = ParseOperation::PreviewPdf(PdfRenderSize::new_expanded(2_400, 3_200));
+    assert!(valid_output(expanded_pdf.clone(), &png(2_400, 3_200)));
+    assert!(!valid_output(expanded_pdf, &png(2_401, 1)));
+    assert!(!valid_output(PDF_PREVIEW.clone(), &png(1_400, 1_800)));
     assert!(valid_output(PDF_PREVIEW.clone(), &png(640, 800)));
     assert!(!valid_output(PDF_PREVIEW.clone(), &png(641, 799)));
     assert!(!valid_output(PDF_PREVIEW.clone(), &png(640, 801)));

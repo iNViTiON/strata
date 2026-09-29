@@ -11,7 +11,7 @@ use crate::{
     ui::{
         browser_modes::{BrowserMode, ClickActivation, ClickCount},
         controls::{menu_option, segmented_control},
-        preferences::PreferenceManager,
+        preferences::{ExpandedPreviewStyle, PreferenceManager},
     },
 };
 
@@ -27,6 +27,7 @@ pub(super) fn general_page(
     let preferences = page_content();
 
     append_browsing_options(&preferences, &manager);
+    append_expanded_preview_options(&preferences, &manager);
     append_sidebar_options(&preferences, &manager);
 
     append_heading(&preferences, "OPENING ITEMS");
@@ -293,6 +294,35 @@ fn append_browsing_options(content: &gtk::Box, manager: &Rc<PreferenceManager>) 
     ] {
         append_preference_switch(&search, manager, switch);
     }
+}
+
+fn append_expanded_preview_options(content: &gtk::Box, manager: &Rc<PreferenceManager>) {
+    let group = super::settings_group(content, "EXPANDED PREVIEW");
+    let style = super::bindings::choice_menu(
+        manager,
+        "Expanded preview style",
+        &[
+            ("Overlay", ExpandedPreviewStyle::Overlay),
+            ("Fullscreen window", ExpandedPreviewStyle::Fullscreen),
+        ],
+        PreferenceManager::expanded_preview_style,
+        PreferenceManager::set_expanded_preview_style,
+    );
+    group.append(&super::control_row(
+        "Expanded preview style",
+        "Overlay is a large layer over the window. Fullscreen window opens a separate fullscreen window that your compositor animates.",
+        &style,
+    ));
+    append_preference_switch(
+        &group,
+        manager,
+        PreferenceSwitch {
+            title: "Hold Shift to control the preview",
+            description: "In the expanded preview, Shift + arrows seek, scroll, turn pages, or pan; plain arrows move to the previous or next file. Turn off to swap them.",
+            read: PreferenceManager::expanded_preview_shift_controls,
+            write: PreferenceManager::set_expanded_preview_shift_controls,
+        },
+    );
 }
 
 fn append_preference_switch(

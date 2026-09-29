@@ -240,6 +240,10 @@ Space preview never queues behind a scrolled directory's thumbnail flood. Both
 pools share the launcher thread, idle retirement, per-job isolation, and cache
 machinery; the cache keys results by source version *and* operation so a
 256-pixel thumbnail can never satisfy an 800-pixel preview of the same file.
+The [expanded preview](keyboard-navigation.md#expanded-preview) adds one more
+operation, `preview-image-expanded`, which renders the longest edge up to 2,880
+pixels (native size for smaller images). It has its own output limit and cache
+key, and its result is never stored as a thumbnail.
 Each preview still runs in a freshly forked, Landlock/seccomp-confined decoder
 with per-job resource limits — only the supervisor process is reused.
 
@@ -428,7 +432,22 @@ sample aspect ratio/right-angle rotation, without unnecessarily enlarging small
 sources. Resizes settle for 250 ms before restarting at the current playback
 position; the previous texture remains visible. Changes that would not materially
 change the fitted frame size do not restart decoding. A paused resize/seek stays
-paused. Mute/volume preferences initialize and update every player's raw-audio
+paused.
+
+A resize that settles while a stream is **playing** does not restart it. A second
+decoder starts at the new size a little ahead of the playhead (about 1.2× the
+first decoder's measured start-up time, between 250 ms and 1.5 s) and decodes in
+the background while the first keeps playing. When the second reaches the frame
+after the last one the first delivered, the stream switches: earlier frames and
+audio came from the first decoder, later ones from the second, and the audio
+output and playback clock carry on unchanged. The switching frame's first 10 ms
+of audio are cross-faded, because decoders that start from a seek can land a few
+samples apart (measured: AAC is sample-exact, Opus is 16–32 samples off, which
+is an audible click without the fade). If no worker is free the first decoder
+simply keeps its size; a second decoder that fails, ends early, or does not line
+up within 4 s is dropped; seeking cancels it. This is how the expanded preview
+changes a playing video's size without a visible stall. The 1,280-pixel decode cap
+is unchanged, so on a display larger than that the video is scaled up. Mute/volume preferences initialize and update every player's raw-audio
 output live; backend preference changes apply on the next preview request.
 
 ## Audio previews

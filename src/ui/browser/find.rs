@@ -301,6 +301,37 @@ impl BrowserView {
         }
     }
 
+    /// Moves the cursor to the nearest previewable entry in `direction` without
+    /// taking keyboard focus, for the expanded preview. Folders and unsupported
+    /// files are skipped, and the cursor stays put at either end.
+    pub(in crate::ui) fn place_previewable_cursor(&self, direction: i32) -> bool {
+        if self.results_replace_listing() {
+            return self.step_filter_results(direction, 1, false);
+        }
+        let step = direction.signum() as isize;
+        let (Some(depth), true) = (self.focused_listing_depth(), step != 0) else {
+            return false;
+        };
+        let Some(order) = self.displayed_order(depth) else {
+            return false;
+        };
+        let mut index = match self.cursor_index(depth, &order) {
+            Some(current) => current as isize + step,
+            None if step > 0 => 0,
+            None => order.len() as isize - 1,
+        };
+        while let Some(&position) = usize::try_from(index).ok().and_then(|i| order.get(i)) {
+            if crate::ui::preview::preview_target(self.state.browser.entry_at(depth, position))
+                .is_some()
+            {
+                self.place_found_cursor(depth, position, &order, false);
+                return true;
+            }
+            index += step;
+        }
+        false
+    }
+
     fn find_next(&self, query: &str, backward: bool, listing_focused: bool) -> bool {
         if let Some(target) = self.filter_target()
             && target.results_view().is_some()
