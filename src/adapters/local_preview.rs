@@ -122,6 +122,8 @@ struct PreviewCacheKey {
     pdf_page: Option<(i32, PdfRenderSize)>,
     model: Option<ModelRender>,
     route: Option<RouteRender>,
+    /// PDF pages already key their render size; images differ only by this.
+    expanded: bool,
 }
 
 impl PreviewCache {
@@ -647,6 +649,7 @@ impl LocalPreviewProvider {
                     pdf_page,
                     model,
                     route,
+                    expanded: request.detail.is_expanded(),
                 });
                 if let Some(cached) = cache_key
                     .as_ref()

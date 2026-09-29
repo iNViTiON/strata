@@ -54,6 +54,7 @@ fn route_requests_bypass_text_and_cache_by_palette() {
                 render_document: false,
                 pdf_page: 0,
                 media_size: MediaPreviewSize::new(400, 300),
+                detail: Default::default(),
                 model_palette: palette,
                 model_view: ModelView::default(),
                 archive_password: None,
