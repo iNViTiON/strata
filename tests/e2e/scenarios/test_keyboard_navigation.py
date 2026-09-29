@@ -35,6 +35,34 @@ def test_arrow_keys_move_focus_and_selection(strata, mode, bindings):
     strata.wait_for_focused_entry("readme.md")
 
 
+@pytest.mark.preferences(type_to_search=False, typing_mode="jump_to_name")
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_typing_jumps_to_a_name_and_arrows_end_the_jump(strata, mode):
+    assert strata.entry_names() == ROOT_ENTRIES
+
+    strata.select_entry("readme.md")
+    strata.wait_for_focused_entry("readme.md")
+
+    strata.keyboard.press("p")
+    strata.wait_for_focused_entry("pictures")
+    strata.keyboard.press("Escape")
+    strata.wait_for_focused_entry("pictures")
+
+    strata.keyboard.press("r")
+    strata.wait_for_focused_entry("readme.md")
+    strata.wait(
+        lambda: strata.selected_names() == ["readme.md"],
+        "the jump to select readme.md",
+    )
+
+    strata.keyboard.press(NEXT_ENTRY_KEY[mode])
+    strata.wait_for_focused_entry("todo.txt")
+
+    # A leftover "r" prefix would make this "ra", which matches nothing.
+    strata.keyboard.press("a")
+    strata.wait_for_focused_entry("archive")
+
+
 @pytest.mark.preferences(arrow_navigation_scoped=True, type_to_search=False)
 @pytest.mark.parametrize("mode", ALL_MODES)
 @pytest.mark.parametrize("bindings", ["arrows", "hjkl"])
