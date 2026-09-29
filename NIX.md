@@ -89,8 +89,19 @@ spawns `/bin/cat`, which NixOS does not provide. A per-repo `/bin` cannot be
 faked without root: a private mount namespace needs an unprivileged user
 namespace, which shows root-owned paths (`/`, `/nix/store`) as `nobody`, and
 Strata's executable-ownership checks then fail 29 `portal_setup` tests. The fix
-is system-level, for example `services.envfs.enable = true;` or a tmpfiles
-symlink `L+ /bin/cat - - - - /run/current-system/sw/bin/cat`.
+is one system-level symlink in the NixOS configuration (preferred over
+`services.envfs`, which mounts FUSE over all of `/bin` and `/usr/bin`):
+
+```nix
+systemd.tmpfiles.rules = [ "L+ /bin/cat - - - - /run/current-system/sw/bin/cat" ];
+```
+
+Drop it once upstream's test resolves `cat` through `PATH`.
+
+Real-app previews on NixOS additionally need `bubblewrap` in
+`environment.systemPackages` (Strata resolves `bwrap` only from system paths),
+and the preview sandbox binds `/usr` and `/lib` but not `/nix/store`, so
+sandboxed helpers likely still fail there until upstream supports it.
 
 ## Worktrees
 
