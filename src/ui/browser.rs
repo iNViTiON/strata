@@ -54,6 +54,7 @@ mod file_commands;
 pub(in crate::ui) mod find;
 pub(super) mod fly_to_trash;
 mod inline_edit;
+mod jump_to_name;
 mod leftovers;
 mod listing_filter;
 mod listing_search;
@@ -314,6 +315,7 @@ pub(super) struct ViewState {
     preparing_transfers: RefCell<Vec<PreparingTransfer>>,
     drop_active_depths: Cell<Option<(usize, usize)>>,
     find: RefCell<find::FindState>,
+    jump: jump_to_name::JumpState,
     listing_filter: listing_filter::FilterState,
     listing_search: listing_search::SearchState,
     result_selection: result_selection::ResultSelection,

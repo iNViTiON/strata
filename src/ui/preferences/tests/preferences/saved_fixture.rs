@@ -46,6 +46,7 @@ fn assert_saved_search(manager: &PreferenceManager) {
 }
 
 fn assert_saved_keyboard_and_window(manager: &PreferenceManager) {
+    assert_eq!(manager.typing_mode(), TypingMode::JumpToName);
     assert_eq!(
         [
             manager.type_to_search(),

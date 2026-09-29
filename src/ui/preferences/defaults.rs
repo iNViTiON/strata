@@ -23,6 +23,7 @@ impl Default for Preferences {
             search_time_limit: default_search_time_limit(),
             search_entry_limit: default_search_entry_limit(),
             type_to_search: true,
+            typing_mode: TypingMode::default(),
             arrow_navigation_scoped: false,
             tenxer_mode: false,
             filter_include_subfolders: true,

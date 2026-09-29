@@ -467,3 +467,39 @@ fn loaded_entry(open: &OpenWindow, path: &std::path::Path) -> crate::model::File
     wait_until(|| find().is_some());
     find().expect("loaded entry")
 }
+
+fn choice_named(root: &impl gtk::prelude::IsA<gtk::Widget>, title: &str) -> gtk::MenuButton {
+    let mut found = None;
+    walk(root.upcast_ref(), &mut |widget| {
+        if found.is_none()
+            && let Some(button) = widget.downcast_ref::<gtk::MenuButton>()
+            && button.tooltip_text().as_deref() == Some(title)
+        {
+            found = Some(button.clone());
+        }
+    });
+    found.unwrap_or_else(|| panic!("choice {title}"))
+}
+
+fn choose_option(choice: &gtk::MenuButton, label: &str) {
+    let popover = choice.popover().expect("choice popover");
+    let mut option = None;
+    walk(popover.upcast_ref(), &mut |widget| {
+        if option.is_none()
+            && let Some(button) = widget.downcast_ref::<gtk::Button>()
+        {
+            let mut labelled = false;
+            walk(button.upcast_ref(), &mut |child| {
+                labelled |= child
+                    .downcast_ref::<gtk::Label>()
+                    .is_some_and(|candidate| candidate.text() == label);
+            });
+            if labelled {
+                option = Some(button.clone());
+            }
+        }
+    });
+    option
+        .unwrap_or_else(|| panic!("option {label}"))
+        .emit_clicked();
+}
