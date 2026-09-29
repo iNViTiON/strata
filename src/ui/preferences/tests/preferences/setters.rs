@@ -32,6 +32,7 @@ fn all_preference_setters_publish_and_persist_without_duplicate_notifications() 
                 |m| m.set_search_time_limit(0),
                 |m| m.set_search_entry_limit(0),
                 |m| m.set_type_to_search(true),
+                |m| m.set_typing_mode(TypingMode::VimKeys),
                 |m| m.set_arrow_navigation_scoped(false),
                 |m| m.set_tenxer_mode(false),
                 |m| m.set_filter_include_subfolders(true),

@@ -23,6 +23,7 @@ pub(in crate::ui) fn non_default_preferences() -> Preferences {
         search_time_limit: 300,
         search_entry_limit: 1_000_000,
         type_to_search: false,
+        typing_mode: TypingMode::JumpToName,
         arrow_navigation_scoped: true,
         tenxer_mode: true,
         filter_include_subfolders: false,

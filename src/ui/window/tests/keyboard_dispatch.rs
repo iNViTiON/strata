@@ -26,6 +26,7 @@ mod footer_prompt;
 mod go_prompt;
 mod icon_motion;
 mod jump_keys;
+mod jump_to_name;
 mod keymap_conflicts;
 mod keymap_overrides;
 mod letter_bookmarks;
@@ -195,6 +196,7 @@ fn seed_fixture_preferences() -> Rc<PreferenceManager> {
     // A visible media column probes the header-only media fixtures, which then leave
     // the preview's media sequence.
     preferences.set_list_column_visible(crate::ui::preferences::ListColumnId::Duration, false);
+    preferences.set_typing_mode(crate::ui::preferences::TypingMode::VimKeys);
     preferences
 }
 

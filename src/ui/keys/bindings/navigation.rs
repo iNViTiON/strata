@@ -84,6 +84,10 @@ catalog! {
         END_KEY: Binding = Binding::plain(Key::End);
         PAGE_UP_KEY: Binding = Binding::plain(Key::Page_Up);
         PAGE_DOWN_KEY: Binding = Binding::plain(Key::Page_Down);
+
+        /// Steps through the names a typed prefix matches while jumping by name.
+        NEXT_NAME: Binding = Binding::ctrl(Key::n);
+        PREVIOUS_NAME: Binding = Binding::ctrl(Key::p);
     }
 }
 

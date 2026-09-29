@@ -431,6 +431,11 @@ impl Dispatcher {
         if let Some(result) = self.input_owner(browser, press) {
             return result;
         }
+        if let Some(result) =
+            crate::ui::jump_to_name::handle_key(&self.view, &self.type_to_search.preferences, press)
+        {
+            return result;
+        }
         if let Some(result) = self.tenxer_keys(browser, press) {
             return result;
         }
