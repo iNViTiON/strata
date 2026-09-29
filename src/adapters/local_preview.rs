@@ -18,8 +18,8 @@ use crate::{
     adapters::gio_close::Closing,
     sandbox::{Cancellation, MediaPreviewBackend, PdfRenderSize},
     services::{
-        LoadHandle, MediaPreviewSize, ModelRender, PreviewContent, PreviewEvent, PreviewProvider,
-        PreviewRequest, normalize_preview_text, route_preview::RouteRender,
+        LoadHandle, MediaPreviewSize, ModelRender, PreviewContent, PreviewDetail, PreviewEvent,
+        PreviewProvider, PreviewRequest, normalize_preview_text, route_preview::RouteRender,
     },
 };
 // The test modules reach these through `super::*`.
@@ -272,8 +272,11 @@ impl LocalPreviewProvider {
     }
 }
 
-fn pdf_render_size(viewport: MediaPreviewSize) -> PdfRenderSize {
-    PdfRenderSize::for_viewport_width(viewport.width)
+fn pdf_render_size(viewport: MediaPreviewSize, detail: PreviewDetail) -> PdfRenderSize {
+    match detail {
+        PreviewDetail::Standard => PdfRenderSize::for_viewport_width(viewport.width),
+        PreviewDetail::Expanded { width } => PdfRenderSize::for_expanded_width(width),
+    }
 }
 
 async fn read_text(

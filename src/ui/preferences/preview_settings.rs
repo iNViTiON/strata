@@ -96,6 +96,26 @@ impl PreferenceManager {
         self.save_preferences();
     }
 
+    pub fn expanded_preview_style(&self) -> ExpandedPreviewStyle {
+        self.preferences.borrow().expanded_preview_style
+    }
+
+    pub fn set_expanded_preview_style(&self, style: ExpandedPreviewStyle) {
+        self.preferences.borrow_mut().expanded_preview_style = style;
+        self.save_preferences();
+    }
+
+    pub fn expanded_preview_shift_controls(&self) -> bool {
+        self.preferences.borrow().expanded_preview_shift_controls
+    }
+
+    pub fn set_expanded_preview_shift_controls(&self, shift_controls: bool) {
+        self.preferences
+            .borrow_mut()
+            .expanded_preview_shift_controls = shift_controls;
+        self.save_preferences();
+    }
+
     /// Percent of the duration a first-time video preview starts at.
     pub fn preview_video_start(&self) -> u32 {
         self.preferences.borrow().preview_video_start

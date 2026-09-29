@@ -18,12 +18,14 @@ pub(crate) mod ambient;
 mod audio;
 #[cfg(debug_assertions)]
 mod diagnostics;
+mod handover;
 mod history;
 mod playback;
 mod positions;
 #[cfg(test)]
 mod tests;
 use audio::PcmOutput;
+use handover::Handover;
 use history::PcmHistory;
 use positions::recall_media_position;
 pub(crate) use positions::resume_position;
@@ -51,6 +53,14 @@ pub(crate) fn use_test_streams(enabled: bool) {
     TEST_STREAMS.with(|streams| streams.set(enabled));
 }
 
+/// A decoded frame with the size of the picture it belongs to, since a
+/// handover changes the picture size while older frames are still queued.
+pub(super) struct QueuedFrame {
+    frame: Frame,
+    width: u32,
+    height: u32,
+}
+
 #[cfg(test)]
 type TestLoader = std::rc::Rc<dyn Fn(SandboxedMedia, u32) -> Result<Session, String>>;
 
@@ -70,7 +80,12 @@ mod imp {
         pub(super) header: Cell<Option<Header>>,
         pub(super) loaded_size: Cell<Option<MediaPreviewSize>>,
         pub(super) texture: RefCell<Option<gdk::Texture>>,
-        pub(super) frames: RefCell<VecDeque<Frame>>,
+        pub(super) frames: RefCell<VecDeque<QueuedFrame>>,
+        pub(super) handover: RefCell<Option<Handover>>,
+        /// The tick that the playback clock and the audio timeline count from.
+        pub(super) origin_tick: Cell<u32>,
+        pub(super) last_tick: Cell<Option<u32>>,
+        pub(super) start_latency: Cell<Option<Duration>>,
         pub(super) audio: RefCell<Option<PcmOutput>>,
         pub(super) timer: RefCell<Option<glib::SourceId>>,
         pub(super) closed: Cell<bool>,
@@ -371,11 +386,15 @@ impl DecodedMedia {
             self.stream_prepared(false, true, true, header.duration_us as i64);
         }
         imp.first_frame.set(true);
-        self.present(Frame {
-            tick: header.start_tick,
-            pixels: vec![0; header.video_bytes()],
-            samples: Vec::new(),
-        });
+        self.present(
+            Frame {
+                tick: header.start_tick,
+                pixels: vec![0; header.video_bytes()],
+                samples: Vec::new(),
+            },
+            header.width,
+            header.height,
+        );
     }
 
     fn ensure_timer(&self) {
@@ -433,6 +452,7 @@ impl DecodedMedia {
             timer.remove();
         }
         imp.session.borrow_mut().take();
+        imp.handover.borrow_mut().take();
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         imp.texture.borrow_mut().take();
@@ -474,6 +494,8 @@ impl DecodedMedia {
         if let Some(session) = imp.session.borrow().as_ref() {
             session.cancel();
         }
+        imp.handover.borrow_mut().take();
+        imp.last_tick.set(None);
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         if let Some(history) = imp.history.borrow_mut().as_mut() {
@@ -498,6 +520,7 @@ impl DecodedMedia {
     fn fail(&self, message: &str) {
         let imp = self.imp();
         imp.session.borrow_mut().take();
+        imp.handover.borrow_mut().take();
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         if self.is_seeking() {

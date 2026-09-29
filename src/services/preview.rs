@@ -22,10 +22,6 @@ pub enum PreviewDetail {
     #[default]
     Standard,
     /// `width` is the width of the larger presentation in device pixels.
-    #[expect(
-        dead_code,
-        reason = "presented by features that render larger than the drawer"
-    )]
     Expanded { width: i32 },
 }
 
