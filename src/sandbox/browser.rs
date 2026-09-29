@@ -198,6 +198,7 @@ pub(crate) fn preview(
     let operation = match operation {
         ParseOperation::PreviewImage | ParseOperation::DocumentImage => Operation::PreviewImage,
         ParseOperation::PreviewRaw => Operation::PreviewRaw,
+        ParseOperation::PreviewImageExpanded => Operation::PreviewImageExpanded,
         ParseOperation::DocumentMermaid => Operation::DocumentMermaid,
         ParseOperation::DocumentMath { display: true } => Operation::DocumentMath,
         ParseOperation::DocumentMath { display: false } => Operation::DocumentMathInline,
@@ -216,6 +217,7 @@ fn invalid_output_label(operation: Operation) -> &'static str {
     match operation {
         Operation::PreviewImage
         | Operation::PreviewRaw
+        | Operation::PreviewImageExpanded
         | Operation::DocumentMermaid
         | Operation::DocumentMath
         | Operation::DocumentMathInline => "Invalid preview render",
@@ -235,6 +237,7 @@ fn parse_operation(operation: Operation) -> ParseOperation {
         Operation::RawMetadata => ParseOperation::RawMetadata,
         Operation::PreviewImage => ParseOperation::PreviewImage,
         Operation::PreviewRaw => ParseOperation::PreviewRaw,
+        Operation::PreviewImageExpanded => ParseOperation::PreviewImageExpanded,
         Operation::DocumentMermaid => ParseOperation::DocumentMermaid,
         Operation::DocumentMath => ParseOperation::DocumentMath { display: true },
         Operation::DocumentMathInline => ParseOperation::DocumentMath { display: false },

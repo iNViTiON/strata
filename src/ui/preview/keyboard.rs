@@ -275,7 +275,7 @@ impl PreviewState {
         }
     }
 
-    fn take_keyboard(self: &Rc<Self>) -> bool {
+    pub(super) fn take_keyboard(self: &Rc<Self>) -> bool {
         if !self.is_enabled() {
             return false;
         }
@@ -448,7 +448,7 @@ impl PreviewState {
 
     /// The tallest scrollable view in the content, which is the document body
     /// rather than a breadcrumb strip or metadata scroller.
-    fn primary_scroll(&self) -> Option<gtk::ScrolledWindow> {
+    pub(super) fn primary_scroll(&self) -> Option<gtk::ScrolledWindow> {
         fn visit(widget: &gtk::Widget, best: &mut Option<gtk::ScrolledWindow>) {
             if !widget.is_visible() {
                 return;
@@ -472,7 +472,7 @@ impl PreviewState {
         best
     }
 
-    fn scroll_document(&self, motion: DocumentScroll) -> bool {
+    pub(super) fn scroll_document(&self, motion: DocumentScroll) -> bool {
         let Some(scroll) = self.primary_scroll() else {
             return false;
         };

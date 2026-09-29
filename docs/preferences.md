@@ -114,6 +114,8 @@ control that might be midway through synchronization.
 | Browser and chooser column widths | A Columns resize or a List heading resize, including double-click autofit, saves the unscaled width. A Columns drag or autofit stops at the visible browser area: the window minus the preview divider and the sidebar at its full width, so while a narrow window rails the sidebar, columns stop short of the window edge by the width the rail gives up. Columns opened later, including a saved width from before, are narrowed to the current area, and so are open columns when the window first lays out and after a text-size change; returning to the earlier text size restores the dragged width. Resizing the window does not narrow open columns; dragging the edge of one that is wider than the area snaps it to the area. New columns and rebuilt List panes read the latest saved defaults before Settings opens. Dragging a Columns edge resizes that column as the pointer moves, with a **Column width** caption that appears once the pointer rests on the edge and follows it through the drag, and when the drag ends the window's other open columns ease to the same width; double-click autofit changes only its own column. Other windows keep their widths. Browser defaults (`browser_column_width`, `browser_list_columns`) and chooser defaults (`chooser_column_width`, `chooser_list_columns`) are independent. The Name column keeps expanding until it is resized itself. Not exposed in Settings. |
 | Icons view thumbnail size | The default size for folders without their own; see [Per-folder sort and thumbnail size](#per-folder-sort-and-thumbnail-size). Every browser binds at construction, and an Icons pane resolves its folder's size before it is built, so it opens at that size. With per-folder settings off, the popover slider sets the default. Visible Icons panes in other windows resize when their folder's size or the default changes. Clamped to 32–256 px; not exposed in Settings. |
 | Hardware video acceleration/backend | Preview providers read the current choice when requesting a preview; changing it does not restart an already playing file. Settings controls and backend availability synchronize live. |
+| Expanded preview style | Read each time a preview is expanded, so a change applies to the next expand in every window. Overlay is the default; Fullscreen window opens a separate fullscreen window. See [Expanded preview](keyboard-navigation.md#expanded-preview). |
+| Hold Shift to control the preview | The window's key dispatch reads the current choice on every arrow pressed in the expanded preview, so a change applies across windows immediately. On by default. See [Expanded preview](keyboard-navigation.md#expanded-preview). |
 | Preview text wrap | Every text preview and header toggle binds to the saved wrap choice, including newly loaded files. Off by default. |
 | Preview autoplay | Read when a video, audio, or GIF preview is first shown. Off by default: playback waits for an explicit play action; the generic player shows its center play affordance, and the audio and video views their transport play button. When on, playback starts silent and fades in on a slow-in, slow-out curve, over 1 s from the first frame for video and over 0.5 s from the first sample for audio, unless the saved audio state is muted or the file is shorter than 10 s, which plays at full volume at once; any play, pause, seek, volume or mute input brings the sound in at once, and the saved volume is never changed. Continuing playback into the next file with `<` / `>` keeps its sound. Does not affect resuming playback that was already active before a preview pane was temporarily hidden by a resize. |
 | Render documents by default | A newly loaded Markdown or HTML preview reads the current choice for its initial Rendered or Source view. Switching the view of an open document does not change the saved default. |
@@ -439,6 +441,19 @@ in a watched folder show within about a second (see
 [Filename patterns while filtering](keyboard-navigation.md#filename-patterns-while-filtering)).
 [10xer mode](10xer-mode.md) does not use it: there **f** filters only the
 current folder and **s** always searches below it.
+
+## Expanded preview
+
+**Settings → General → Expanded preview → Expanded preview style** chooses
+**Overlay** (default), a large layer over Strata's window, or **Fullscreen
+window**, a separate window opened fullscreen on the main window's monitor whose
+opening and closing animation belongs to the compositor. It is read when the preview is
+expanded; a preview that is already expanded keeps its style.
+
+**Hold Shift to control the preview** is on by default. In the expanded preview, Shift + arrow keys then drive the
+preview (seek, scroll, turn pages, pan) and plain arrows move to the previous or
+next file. Turn it off to swap the two. The small preview is unaffected. The
+choice is read when each key is pressed, not cached per window.
 
 ## 10xer mode
 
