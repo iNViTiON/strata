@@ -17,8 +17,8 @@ use crate::{
     model::{EntryKind, FileEntry, MetadataValue},
     services::{
         ArchivePreviewTree, DocumentLayout, LoadHandle, MediaPreviewSize, PdfTextLayer, Preview,
-        PreviewContent, PreviewEvent, PreviewProvider, PreviewRequest, PreviewRequestId,
-        SecretString, normalize_preview_text,
+        PreviewContent, PreviewDetail, PreviewEvent, PreviewProvider, PreviewRequest,
+        PreviewRequestId, SecretString, normalize_preview_text,
     },
 };
 
@@ -33,6 +33,7 @@ mod media_layout;
 #[cfg(test)]
 mod pdf_ranges_tests;
 mod pdf_text;
+mod presentation;
 mod session;
 
 pub(in crate::ui) const DEFAULT_WIDTH: i32 = 520;
@@ -171,6 +172,7 @@ struct PreviewState {
     continue_playback: RefCell<Option<PlaybackContinuation>>,
     split: RefCell<Option<gtk::Paned>>,
     sizing: layout::SplitSizing,
+    presentation: presentation::Listeners,
     current: RefCell<Option<FileEntry>>,
     current_depth: Cell<Option<usize>>,
     pending_show: RefCell<Option<glib::SourceId>>,
@@ -367,6 +369,7 @@ impl PreviewDrawer {
             media_toggle_mute: RefCell::new(None),
             split: RefCell::new(None),
             sizing: layout::SplitSizing::default(),
+            presentation: presentation::Listeners::default(),
             current: RefCell::new(None),
             current_depth: Cell::new(None),
             pending_show: RefCell::new(None),
@@ -995,6 +998,7 @@ impl PreviewState {
                 render_document: false,
                 pdf_page,
                 media_size: self.media_preview_size(),
+                detail: Default::default(),
                 model_palette: super::theme::ThemeManager::shared().active_model_palette(),
                 archive_password: None,
             },
@@ -1196,6 +1200,7 @@ impl PreviewState {
         self.content_type.set_text(file_extension(&entry));
         self.load.borrow_mut().take();
         self.pdf_loads.borrow_mut().clear();
+        let detail = self.current_detail();
 
         let request_id = PreviewRequestId(self.next_request.get());
         self.next_request
@@ -1224,6 +1229,7 @@ impl PreviewState {
                 render_document,
                 pdf_page,
                 media_size: self.media_preview_size(),
+                detail,
                 model_palette: super::theme::ThemeManager::shared().active_model_palette(),
                 archive_password,
             },
@@ -2032,6 +2038,7 @@ impl PreviewState {
                     render_document: false,
                     pdf_page: page_index,
                     media_size: render_size,
+                    detail: Default::default(),
                     model_palette: super::theme::ThemeManager::shared().active_model_palette(),
                     archive_password: None,
                 },

@@ -222,6 +222,21 @@ fn an_explicit_close_blocks_automatic_previews_until_reopened() {
 }
 
 #[test]
+fn loads_ask_for_the_detail_the_preview_is_presented_at() {
+    crate::test_support::gtk_test(
+        "ui::preview::tests::loads_ask_for_the_detail_the_preview_is_presented_at",
+        || {
+            let provider = Rc::new(Provider::default());
+            let drawer = PreviewDrawer::new(provider.clone(), false);
+            drawer.show(entry("photo.png"), None);
+            let pending = provider.0.borrow();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].request.detail, PreviewDetail::Standard);
+        },
+    );
+}
+
+#[test]
 fn preview_loads_on_first_show_when_sidebar_rails_in_narrow_split() {
     crate::test_support::gtk_test(
         "ui::preview::tests::preview_loads_on_first_show_when_sidebar_rails_in_narrow_split",
@@ -283,6 +298,26 @@ fn preview_loads_on_first_show_when_sidebar_rails_in_narrow_split() {
             );
 
             window.destroy();
+        },
+    );
+}
+
+#[test]
+fn presentation_listeners_run_in_order_on_every_change() {
+    crate::test_support::gtk_test(
+        "ui::preview::tests::presentation_listeners_run_in_order_on_every_change",
+        || {
+            let drawer = PreviewDrawer::new(Rc::new(Provider::default()), false);
+            let calls = Rc::new(RefCell::new(Vec::new()));
+            for label in ["first", "second"] {
+                let calls = calls.clone();
+                drawer
+                    .state
+                    .on_presentation_changed(move || calls.borrow_mut().push(label));
+            }
+            drawer.state.presentation_changed();
+            drawer.state.presentation_changed();
+            assert_eq!(*calls.borrow(), ["first", "second", "first", "second"]);
         },
     );
 }
