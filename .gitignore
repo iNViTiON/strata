@@ -29,3 +29,6 @@ packaging/aur/*/*.pkg.tar.zst
 /docs/evidence/
 /docs/screenshots/
 /docs/images/
+
+# Nix/direnv dev shell (nix-dev branch)
+/.direnv/

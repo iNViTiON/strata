@@ -1,0 +1,138 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  UPSTREAM: https://github.com/lgse/strata.git
+  MIRROR_BRANCH: main
+  DEV_BRANCH: nix-dev
+  ISSUE_LABEL: sync-conflict
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the fork with the sync token
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SYNC_PAT }}
+          ref: ${{ env.DEV_BRANCH }}
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        id: refs
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM"
+          git fetch --no-tags upstream "$MIRROR_BRANCH"
+          git fetch --no-tags origin "$MIRROR_BRANCH" "$DEV_BRANCH"
+          {
+            echo "old_main=$(git rev-parse "origin/$MIRROR_BRANCH")"
+            echo "new_main=$(git rev-parse "upstream/$MIRROR_BRANCH")"
+            echo "old_dev=$(git rev-parse "origin/$DEV_BRANCH")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Rebase the dev branch onto the new upstream main
+        id: rebase
+        if: steps.refs.outputs.old_main != steps.refs.outputs.new_main
+        env:
+          OLD_MAIN: ${{ steps.refs.outputs.old_main }}
+          NEW_MAIN: ${{ steps.refs.outputs.new_main }}
+          OLD_DEV: ${{ steps.refs.outputs.old_dev }}
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$OLD_MAIN" "$NEW_MAIN"; then
+            echo "reason=diverged" >> "$GITHUB_OUTPUT"
+            echo "::error::The fork's $MIRROR_BRANCH has commits that are not in upstream."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --detach "$OLD_DEV"
+          if ! git rebase --onto "$NEW_MAIN" "$OLD_MAIN" > rebase.log 2>&1; then
+            cat rebase.log
+            {
+              echo "reason=conflict"
+              echo "files<<EOF"
+              git diff --name-only --diff-filter=U
+              echo "EOF"
+              echo "commit=$(git rev-parse --verify --quiet REBASE_HEAD || echo unknown)"
+            } >> "$GITHUB_OUTPUT"
+            git rebase --abort
+            exit 1
+          fi
+          git push --atomic \
+            "--force-with-lease=refs/heads/$DEV_BRANCH:$OLD_DEV" \
+            "--force-with-lease=refs/heads/$MIRROR_BRANCH:$OLD_MAIN" \
+            origin "$NEW_MAIN:refs/heads/$MIRROR_BRANCH" "HEAD:refs/heads/$DEV_BRANCH"
+
+      - name: Report the failed sync in an issue
+        if: failure() && steps.rebase.outputs.reason != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ steps.rebase.outputs.reason }}
+          FILES: ${{ steps.rebase.outputs.files }}
+          COMMIT: ${{ steps.rebase.outputs.commit }}
+          OLD_MAIN: ${{ steps.refs.outputs.old_main }}
+          NEW_MAIN: ${{ steps.refs.outputs.new_main }}
+          OLD_DEV: ${{ steps.refs.outputs.old_dev }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh label create "$ISSUE_LABEL" --color B60205 --description "Upstream sync needs manual help" --force
+          if [[ "$REASON" == diverged ]]; then
+            summary="\`$MIRROR_BRANCH\` in this fork is not an ancestor of upstream \`$MIRROR_BRANCH\`, so it cannot be fast-forwarded. It must mirror upstream exactly; reset it to upstream by hand."
+          else
+            summary="Rebasing \`$DEV_BRANCH\` onto the new upstream \`$MIRROR_BRANCH\` conflicted while applying \`$COMMIT\`. Nothing was pushed.
+
+          Conflicting files:
+          \`\`\`
+          $FILES
+          \`\`\`"
+          fi
+          body="$summary
+
+          | | SHA |
+          | --- | --- |
+          | fork \`$MIRROR_BRANCH\` | \`$OLD_MAIN\` |
+          | upstream \`$MIRROR_BRANCH\` | \`$NEW_MAIN\` |
+          | fork \`$DEV_BRANCH\` | \`$OLD_DEV\` |
+
+          Resolve locally:
+          \`\`\`bash
+          git fetch upstream && git fetch origin
+          git switch $DEV_BRANCH && git reset --keep origin/$DEV_BRANCH
+          git rebase --onto upstream/$MIRROR_BRANCH $OLD_MAIN
+          # fix conflicts, git add, git rebase --continue
+          git push --atomic --force-with-lease=$DEV_BRANCH:$OLD_DEV origin upstream/$MIRROR_BRANCH:$MIRROR_BRANCH $DEV_BRANCH
+          \`\`\`
+
+          Run: $RUN_URL"
+          existing="$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            gh issue edit "$existing" --body "$body"
+            gh issue comment "$existing" --body "Sync failed again: $RUN_URL"
+          else
+            gh issue create --title "Upstream sync failed ($REASON)" --label "$ISSUE_LABEL" --body "$body"
+          fi
+
+      - name: Close resolved sync issues
+        if: success() && steps.rebase.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for number in $(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[].number'); do
+            gh issue close "$number" --comment "Sync succeeded: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          done
