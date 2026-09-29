@@ -28,6 +28,7 @@ use super::{SidebarState, SidebarView, TypeToSearch, visible_modal_layer};
 pub(super) mod chords;
 mod commands;
 mod escape;
+mod expanded;
 mod files;
 mod focus;
 mod items;
@@ -72,6 +73,7 @@ pub(super) fn install(window: &gtk::ApplicationWindow, sidebar: &SidebarView, bi
         },
     };
     dispatcher.preview.bind_keyboard_view(&dispatcher.view);
+    dispatcher.preview.enable_expansion();
     let keycaps = Rc::downgrade(&sidebar.state);
     dispatcher.shortcuts.connect_chord_changed(move |chord| {
         if let Some(sidebar) = keycaps.upgrade() {
@@ -92,6 +94,17 @@ pub(super) fn install(window: &gtk::ApplicationWindow, sidebar: &SidebarView, bi
     release_preview_keys_on_mode_exit(window, &dispatcher.preview, &weak_browser);
     clear_find_on_mode_exit(window, &dispatcher, &weak_browser);
     bind_footer_filter(&dispatcher);
+    let dispatcher = Rc::new(dispatcher);
+    let weak_dispatcher = Rc::downgrade(&dispatcher);
+    dispatcher
+        .preview
+        .set_expanded_key_handler(move |key, modifiers| {
+            weak_dispatcher
+                .upgrade()
+                .map_or(Propagation::Proceed, |dispatcher| {
+                    dispatcher.expanded_window_key(key, modifiers)
+                })
+        });
     keys.connect_key_pressed(move |_, key, _, modifiers| {
         let Some(browser) = weak_browser.upgrade() else {
             return Propagation::Proceed;
@@ -429,7 +442,7 @@ fn visible_popover_menu(widget: &gtk::Widget) -> bool {
 fn inside_pdf_scroll(widget: &gtk::Widget) -> bool {
     let mut current = Some(widget.clone());
     while let Some(widget) = current {
-        if widget.has_css_class("preview-pdf-scroll") {
+        if widget.has_css_class("preview-pdf-scroll") || widget.has_css_class("preview-zoom") {
             return true;
         }
         current = widget.parent();
@@ -492,6 +505,9 @@ impl Dispatcher {
             return Propagation::Stop;
         }
         if let Some(result) = self.input_owner(browser, key, modifiers) {
+            return result;
+        }
+        if let Some(result) = self.expanded_preview(browser, key, modifiers) {
             return result;
         }
         if let Some(result) = self.tenxer_keys(browser, key, modifiers) {

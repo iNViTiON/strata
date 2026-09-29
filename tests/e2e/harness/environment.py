@@ -63,6 +63,8 @@ DEFAULT_PREFERENCES: dict[str, object] = {
     "cross_volume_drop_strategy": "always-ask",
     "release_channel": "stable",
     "video_preview_backend": "automatic",
+    "expanded_preview_style": "overlay",
+    "expanded_preview_shift_controls": True,
     "preview_muted": True,
     "preview_volume": 1.0,
     "sidebar_order": ["desktop", "documents", "downloads", "pictures", "videos"],
