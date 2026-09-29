@@ -158,6 +158,7 @@ fn cold_previews_with_shared_thumbnails_match_rendered_cache_hits() {
                     render_document: false,
                     pdf_page: 0,
                     media_size: MediaPreviewSize::new(640, 800),
+                    detail: Default::default(),
                     model_palette: crate::services::ModelPalette::default(),
                     archive_password: None,
                 };
@@ -213,6 +214,29 @@ fn cold_previews_with_shared_thumbnails_match_rendered_cache_hits() {
 }
 
 #[test]
+fn expanded_renders_are_cached_apart_from_standard_ones() {
+    let mut cache = PreviewCache {
+        entries: HashMap::new(),
+        recent: VecDeque::new(),
+        byte_count: 0,
+    };
+    let key = |expanded| PreviewCacheKey {
+        path: PathBuf::from("photo.png"),
+        modified: 1,
+        pdf_page: None,
+        model: None,
+        expanded,
+    };
+    let standard = PreviewContent::Rasterized { png: vec![1] };
+    let expanded = PreviewContent::Rasterized { png: vec![2, 2] };
+    cache.insert(key(false), standard.clone());
+    assert_eq!(cache.get(&key(true)), None);
+    cache.insert(key(true), expanded.clone());
+    assert_eq!(cache.get(&key(false)), Some(standard));
+    assert_eq!(cache.get(&key(true)), Some(expanded));
+}
+
+#[test]
 fn preview_cache_stores_and_retrieves_entries() {
     let mut cache = PreviewCache {
         entries: HashMap::new(),
@@ -224,6 +248,7 @@ fn preview_cache_stores_and_retrieves_entries() {
         modified: 100,
         pdf_page: None,
         model: None,
+        expanded: false,
     };
     let content1 = PreviewContent::Rasterized {
         png: vec![1, 2, 3, 4],
@@ -237,6 +262,7 @@ fn preview_cache_stores_and_retrieves_entries() {
         modified: 200,
         pdf_page: None,
         model: None,
+        expanded: false,
     };
     let content2 = PreviewContent::Text {
         content: "hello world".to_owned(),
@@ -251,12 +277,14 @@ fn preview_cache_stores_and_retrieves_entries() {
         modified: 300,
         pdf_page: Some((0, PdfRenderSize::new(640, 800))),
         model: None,
+        expanded: false,
     };
     let pdf_page_1 = PreviewCacheKey {
         path: PathBuf::from("doc.pdf"),
         modified: 300,
         pdf_page: Some((1, PdfRenderSize::new(640, 800))),
         model: None,
+        expanded: false,
     };
     let page0_content = PreviewContent::Pdf {
         png: vec![10, 20],
@@ -280,6 +308,7 @@ fn preview_cache_stores_and_retrieves_entries() {
             modified: 300,
             pdf_page: Some((0, PdfRenderSize::new(800, 1_800))),
             model: None,
+            expanded: false,
         }),
         None,
         "a page rendered for a smaller viewport must not poison a larger preview"
@@ -406,6 +435,7 @@ fn cancelled_in_flight_document_renders_keep_the_permit_and_emit_no_stale_events
                 render_document: false,
                 pdf_page: 1,
                 media_size: MediaPreviewSize::new(640, 800),
+                detail: Default::default(),
                 model_palette: crate::services::ModelPalette::default(),
                 archive_password: None,
             },
@@ -490,6 +520,7 @@ fn cancelled_archive_listings_emit_no_stale_events() {
             render_document: false,
             pdf_page: 0,
             media_size: MediaPreviewSize::new(640, 800),
+            detail: Default::default(),
             model_palette: crate::services::ModelPalette::default(),
             archive_password: None,
         },
@@ -533,6 +564,7 @@ fn preview_cache_evicts_the_least_recent_entry() {
             modified: index as i64,
             pdf_page: None,
             model: None,
+            expanded: false,
         })
         .collect();
 
@@ -563,6 +595,7 @@ fn replacing_a_preview_cache_entry_updates_its_byte_count() {
         modified: 1,
         pdf_page: None,
         model: None,
+        expanded: false,
     };
 
     cache.insert(key.clone(), PreviewContent::Rasterized { png: vec![0; 8] });
@@ -584,6 +617,7 @@ fn active_media_requests_are_never_retained_by_the_preview_cache() {
         modified: 1,
         pdf_page: None,
         model: None,
+        expanded: false,
     };
     let content = PreviewContent::SandboxedMedia {
         media: SandboxedMedia {
@@ -689,6 +723,7 @@ fn uncertain_file_names_resolve_their_preview_from_the_content() {
             render_document: false,
             pdf_page: 0,
             media_size: MediaPreviewSize::new(640, 800),
+            detail: Default::default(),
             model_palette: crate::services::ModelPalette::default(),
             archive_password: None,
         };
@@ -763,6 +798,7 @@ fn text_subclassed_names_resolve_their_preview_from_the_type_hierarchy() {
             render_document: false,
             pdf_page: 0,
             media_size: MediaPreviewSize::new(640, 800),
+            detail: Default::default(),
             model_palette: crate::services::ModelPalette::default(),
             archive_password: None,
         };
@@ -841,6 +877,7 @@ fn archives_list_member_trees_as_preview_content() {
                 render_document: false,
                 pdf_page: 0,
                 media_size: MediaPreviewSize::new(640, 800),
+                detail: Default::default(),
                 model_palette: crate::services::ModelPalette::default(),
                 archive_password: None,
             };
@@ -949,6 +986,7 @@ fn preview_archive_with_password(
         render_document: false,
         pdf_page: 0,
         media_size: MediaPreviewSize::new(640, 800),
+        detail: Default::default(),
         model_palette: crate::services::ModelPalette::default(),
         archive_password: password
             .map(|password| crate::services::SecretString::new(password.to_owned())),
@@ -1246,6 +1284,7 @@ fn unsupported_archive_preview_reports_unsupported_format() {
                 render_document: false,
                 pdf_page: 0,
                 media_size: MediaPreviewSize::new(640, 800),
+                detail: Default::default(),
                 model_palette: crate::services::ModelPalette::default(),
                 archive_password: None,
             };

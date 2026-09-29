@@ -15,6 +15,26 @@ use super::{DocumentLayout, LoadHandle, operations::ArchiveFormat};
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct PreviewRequestId(pub u64);
 
+/// How much detail a raster preview asks for. `Standard` fits the drawer;
+/// `Expanded` is for a larger presentation.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum PreviewDetail {
+    #[default]
+    Standard,
+    /// `width` is the width of the larger presentation in device pixels.
+    #[expect(
+        dead_code,
+        reason = "presented by features that render larger than the drawer"
+    )]
+    Expanded { width: i32 },
+}
+
+impl PreviewDetail {
+    pub fn is_expanded(self) -> bool {
+        matches!(self, Self::Expanded { .. })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct MediaPreviewSize {
     pub width: i32,
@@ -64,6 +84,7 @@ pub struct PreviewRequest {
     pub render_document: bool,
     pub pdf_page: i32,
     pub media_size: MediaPreviewSize,
+    pub detail: PreviewDetail,
     pub model_palette: super::ModelPalette,
     pub archive_password: Option<SecretString>,
 }
