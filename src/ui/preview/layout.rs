@@ -327,6 +327,7 @@ impl PreviewState {
     }
 
     pub(super) fn hide_panel(&self) {
+        self.collapse_now();
         self.finish_hide(self.hide_intent());
     }
 

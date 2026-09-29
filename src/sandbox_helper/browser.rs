@@ -96,6 +96,9 @@ fn preview(input: &Path, operation: Operation) -> Option<Result<Vec<u8>, String>
     Some(match operation {
         Operation::PreviewImage => document_media::image(input, 800),
         Operation::PreviewRaw => render_camera_raw_preview(input, 800),
+        Operation::PreviewImageExpanded => {
+            document_media::image(input, crate::sandbox::EXPANDED_IMAGE_EDGE)
+        }
         Operation::DocumentMermaid => document_media::mermaid(input),
         Operation::DocumentMath => document_media::math(input, true),
         Operation::DocumentMathInline => document_media::math(input, false),

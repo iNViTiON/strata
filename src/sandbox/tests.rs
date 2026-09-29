@@ -23,6 +23,7 @@ const MEDIA_PREVIEW: ParseOperation = ParseOperation::PreviewMedia(MediaPreviewS
 const PDF_PREVIEW: ParseOperation = ParseOperation::PreviewPdf(PdfRenderSize {
     width: 640,
     height: 800,
+    expanded: false,
 });
 
 /// The arguments of one `sandbox_command` call, defaulting to a software

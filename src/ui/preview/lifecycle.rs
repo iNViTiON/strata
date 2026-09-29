@@ -85,12 +85,15 @@ impl PreviewState {
         self.child_pane.set(false);
         self.set_enabled(true);
         let reopening = self.closing.replace(false);
-        let was_open = (self.revealer.reveals_child() && !reopening) || self.sizing.is_suspended();
+        let expanded = self.expanded.is_active();
+        let was_open =
+            (self.revealer.reveals_child() && !reopening) || self.sizing.is_suspended() || expanded;
         let already_showing =
             self.current.borrow().as_ref() == Some(&entry) && self.current_request.get().is_some();
         let reload = !was_open || !already_showing;
         let split = self.split.borrow().clone();
         if let Some(split) = split.as_ref()
+            && !expanded
             && (!self.can_show_in(split) || self.sizing.is_suspended())
         {
             self.defer_show(split, entry, reload);
@@ -129,6 +132,7 @@ impl PreviewState {
     }
 
     pub(super) fn stop(&self) {
+        self.abandon_expansion();
         self.set_enabled(false);
         self.child_pane.set(false);
         self.clear_target();
@@ -138,6 +142,7 @@ impl PreviewState {
     }
 
     pub(super) fn close(self: &Rc<Self>) {
+        self.collapse_now();
         self.media_checks.borrow_mut().stop();
         let tree_focused = self.archive_tree_focused();
         // The preview closes now, so input such as the next Escape already

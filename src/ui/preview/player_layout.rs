@@ -6,7 +6,7 @@ use gtk::{gdk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 
 use super::{
     components::{CONTROLS_GAP, GAP, PADDING, PANEL_MIN},
-    media_layout::{MAX_CONTENT_WIDTH, fitted_size},
+    media_layout::{MAX_CONTENT_WIDTH, MAX_UPSCALE, fitted_size, in_expanded_preview},
 };
 
 const FRAME_MIN: i32 = 48;
@@ -136,18 +136,31 @@ mod imp {
             (minimum, minimum + FRAME_MIN + GAP, -1, -1)
         }
 
-        fn allocate(&self, _: &gtk::Widget, width: i32, height: i32, _: i32) {
+        fn allocate(&self, widget: &gtk::Widget, width: i32, height: i32, _: i32) {
             let parts = &self.parts;
             let Some(content) = parts.content.upgrade() else {
                 return;
             };
-            let content_width = (width - 2 * PADDING).clamp(0, MAX_CONTENT_WIDTH);
+            let expanded = in_expanded_preview(widget);
+            let content_width = (width - 2 * PADDING).clamp(
+                0,
+                if expanded {
+                    i32::MAX
+                } else {
+                    MAX_CONTENT_WIDTH
+                },
+            );
             let panel_min = parts.panel_minimum();
             let fixed = parts.fixed_height(content_width.max(panel_min));
             let free = height - 2 * PADDING - fixed - GAP;
             let margin = self.margin.get();
+            let max_upscale = if expanded && self.is_video() {
+                f64::INFINITY
+            } else {
+                MAX_UPSCALE
+            };
             let (frame_width, frame_height) =
-                self.frame_size(content_width - 2 * margin, free - 2 * margin);
+                self.frame_size(content_width - 2 * margin, free - 2 * margin, max_upscale);
             let (outer_width, outer_height) = if frame_height >= FRAME_MIN {
                 (frame_width + 2 * margin, frame_height + 2 * margin)
             } else {
@@ -189,7 +202,13 @@ mod imp {
     }
 
     impl PlayerLayout {
-        fn frame_size(&self, width: i32, height: i32) -> (i32, i32) {
+        fn is_video(&self) -> bool {
+            self.paintable
+                .upgrade()
+                .is_some_and(|paintable| paintable.is::<crate::ui::media::DecodedMedia>())
+        }
+
+        fn frame_size(&self, width: i32, height: i32, max_upscale: f64) -> (i32, i32) {
             let (width, height) = (width.max(0), height.max(0));
             if let Some(paintable) = self.paintable.upgrade()
                 && paintable.intrinsic_width() > 0
@@ -200,6 +219,7 @@ mod imp {
                     height,
                     paintable.intrinsic_width(),
                     paintable.intrinsic_height(),
+                    max_upscale,
                 );
             }
             let aspect = self.aspect.get().unwrap_or(DEFAULT_ASPECT);

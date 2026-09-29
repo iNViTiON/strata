@@ -37,8 +37,8 @@ use command::sandbox_input_path;
 use command::{SandboxCommand, runtime_command, sandbox_command};
 pub(crate) use command::{gpu_devices, numbered_name, polaris_gpu_available, sandbox_tool};
 pub(crate) use operation::{
-    CoverFormat, DocumentFormat, MediaPreviewBackend, PDF_PASSWORD_PROTECTED, ParseOperation,
-    PdfPreviewError, PdfRenderSize,
+    CoverFormat, DocumentFormat, EXPANDED_IMAGE_EDGE, MediaPreviewBackend, PDF_PASSWORD_PROTECTED,
+    ParseOperation, PdfPreviewError, PdfRenderSize,
 };
 pub(crate) use output::png_dimensions;
 #[cfg(test)]

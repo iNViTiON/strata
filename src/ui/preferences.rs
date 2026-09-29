@@ -124,6 +124,14 @@ pub(crate) enum UnitSystem {
     Imperial,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ExpandedPreviewStyle {
+    #[default]
+    Overlay,
+    Fullscreen,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(in crate::ui) struct Preferences {
     mode: String,
@@ -269,6 +277,10 @@ pub(in crate::ui) struct Preferences {
     preview_video_start: u32,
     #[serde(default = "default_enabled")]
     watch_network_folders: bool,
+    #[serde(default)]
+    expanded_preview_style: ExpandedPreviewStyle,
+    #[serde(default = "default_enabled")]
+    expanded_preview_shift_controls: bool,
     #[serde(default = "crate::sandbox::browser::default_worker_limit")]
     thumbnail_workers: usize,
     #[serde(default = "default_enabled")]

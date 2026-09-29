@@ -90,6 +90,8 @@ pub(in crate::ui) fn non_default_preferences() -> Preferences {
         preview_autoplay: true,
         preview_video_start: 20,
         watch_network_folders: false,
+        expanded_preview_style: ExpandedPreviewStyle::Fullscreen,
+        expanded_preview_shift_controls: false,
         thumbnail_workers: 6,
         show_thumbnails: false,
         stl_thumbnails: true,

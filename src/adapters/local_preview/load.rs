@@ -542,11 +542,15 @@ impl PreviewLoad {
         match self.content {
             PreviewContent::Pdf { .. } => Some(ParseOperation::PreviewPdf(pdf_render_size(
                 self.request.media_size,
+                self.request.detail,
             ))),
             PreviewContent::Image
                 if crate::sandbox::raw_metadata::is_raw(Path::new(&self.entry.native_name)) =>
             {
                 Some(ParseOperation::PreviewRaw)
+            }
+            PreviewContent::Image if self.request.detail.is_expanded() => {
+                Some(ParseOperation::PreviewImageExpanded)
             }
             PreviewContent::Image => Some(ParseOperation::PreviewImage),
             PreviewContent::Media => None,
@@ -588,7 +592,9 @@ impl PreviewLoad {
         }
         if !matches!(
             operation,
-            ParseOperation::PreviewImage | ParseOperation::PreviewRaw
+            ParseOperation::PreviewImage
+                | ParseOperation::PreviewRaw
+                | ParseOperation::PreviewImageExpanded
         ) {
             return Err(Stop::Failed(remote_unsupported_message(operation).into()));
         }
@@ -656,6 +662,7 @@ impl PreviewLoad {
         if matches!(plan.operation, ParseOperation::PreviewPdf(_)) {
             if let Some(mtime) = modified
                 && self.request.pdf_page == 0
+                && !self.request.detail.is_expanded()
             {
                 self.thumbnail = Some((path.to_path_buf(), mtime, output.data.clone()));
             }
@@ -666,9 +673,10 @@ impl PreviewLoad {
                 text_layer: output.text_layer.map(std::sync::Arc::new),
             });
         }
-        if let Some(mtime) =
-            modified.filter(|_| !matches!(plan.operation, ParseOperation::PreviewCover(_)))
-        {
+        if let Some(mtime) = modified.filter(|_| {
+            !self.request.detail.is_expanded()
+                && !matches!(plan.operation, ParseOperation::PreviewCover(_))
+        }) {
             self.thumbnail = Some((path.to_path_buf(), mtime, output.data.clone()));
         }
         Ok(PreviewContent::Rasterized { png: output.data })
