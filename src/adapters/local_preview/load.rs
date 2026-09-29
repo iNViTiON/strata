@@ -689,6 +689,7 @@ impl PreviewLoad {
             pdf_page: plan.pdf_page(self.request.pdf_page),
             model: plan.model,
             route: plan.route,
+            expanded: self.request.detail.is_expanded(),
         });
         if let Some(cached) = cache_key
             .as_ref()

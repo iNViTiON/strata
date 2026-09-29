@@ -165,6 +165,7 @@ impl PageLoader {
                 render_document: false,
                 pdf_page: page_index,
                 media_size: self.render_size,
+                detail: Default::default(),
                 model_palette: super::super::super::theme::ThemeManager::shared()
                     .active_model_palette(),
                 model_view: Default::default(),

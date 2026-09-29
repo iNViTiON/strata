@@ -98,6 +98,7 @@ impl PreviewState {
         self.show_identity(&entry);
         self.load.borrow_mut().take();
         self.pdf_loads.borrow_mut().clear();
+        let detail = self.current_detail();
 
         let request_id = self.begin_request();
         self.retain_pending_playback(&entry);
@@ -123,6 +124,7 @@ impl PreviewState {
                 render_document,
                 pdf_page,
                 media_size: self.media_preview_size(),
+                detail,
                 model_palette: super::super::theme::ThemeManager::shared().active_model_palette(),
                 model_view: self.model_view.get(),
                 archive_password,
