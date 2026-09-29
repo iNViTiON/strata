@@ -116,6 +116,8 @@ control that might be midway through synchronization.
 | Icons view thumbnail size | The default size for folders without their own; see [Per-folder sort and thumbnail size](#per-folder-sort-and-thumbnail-size). Every browser binds at construction, and an Icons pane resolves its folder's size before it is built, so it opens at that size. With per-folder settings off, the popover slider sets the default. Visible Icons panes in other windows resize when their folder's size or the default changes. Clamped to 32–256 px; not exposed in Settings. |
 | Hardware video acceleration/backend | Preview providers read the current choice when requesting a preview; changing it does not restart an already playing file. Settings controls and backend availability synchronize live. |
 | Units | Metric by default: kilometres and metres. Imperial uses miles and feet. Settings → General → Units edits the saved `unit_system` choice. Open previews, including the chooser, update immediately without resetting playback; new files and later sessions use the saved choice. |
+| Expanded preview style | Read each time a preview is expanded, so a change applies to the next expand in every window. Overlay is the default; Fullscreen window opens a separate fullscreen window. See [Expanded preview](keyboard-navigation.md#expanded-preview). |
+| Hold Shift to control the preview | The window's key dispatch reads the current choice on every arrow pressed in the expanded preview, so a change applies across windows immediately. On by default. See [Expanded preview](keyboard-navigation.md#expanded-preview). |
 | Preview text wrap | Every text preview and header toggle binds to the saved wrap choice, including newly loaded files. Off by default. |
 | Preview autoplay | Read when a video, audio, or GIF preview is first shown. Off by default: playback waits for an explicit play action; the generic player shows its center play affordance, and the audio and video views their transport play button. When on, playback starts silent and fades in on a slow-in, slow-out curve, over 1 s from the first frame for video and over 0.5 s from the first sample for audio, unless the saved audio state is muted or the file is shorter than 10 s, which plays at full volume at once; any play, pause, seek, volume or mute input brings the sound in at once, and the saved volume is never changed. Continuing playback into the next file with `<` / `>` keeps its sound. Does not affect resuming playback that was already active before a preview pane was temporarily hidden by a resize. |
 | Render documents by default | A newly loaded Markdown or HTML preview reads the current choice for its initial Rendered or Source view. Switching the view of an open document does not change the saved default. |
@@ -452,6 +454,19 @@ in a watched folder show within about a second (see
 [Filename patterns while filtering](keyboard-navigation.md#filename-patterns-while-filtering)).
 [10xer mode](10xer-mode.md) does not use it: there **f** filters only the
 current folder and **s** always searches below it.
+
+## Expanded preview
+
+**Settings → General → Expanded preview → Expanded preview style** chooses
+**Overlay** (default), a large layer over Strata's window, or **Fullscreen
+window**, a separate window opened fullscreen on the main window's monitor whose
+opening and closing animation belongs to the compositor. It is read when the preview is
+expanded; a preview that is already expanded keeps its style.
+
+**Hold Shift to control the preview** is on by default. In the expanded preview, Shift + arrow keys then drive the
+preview (seek, scroll, turn pages, pan) and plain arrows move to the previous or
+next file. Turn it off to swap the two. The small preview is unaffected. The
+choice is read when each key is pressed, not cached per window.
 
 ## 10xer mode
 

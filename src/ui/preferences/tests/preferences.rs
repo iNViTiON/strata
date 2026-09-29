@@ -1117,6 +1117,11 @@ fn every_saved_preference_loads_before_any_settings_page_exists() {
             assert_eq!(manager.unit_system(), UnitSystem::Imperial);
             assert!(manager.preview_autoplay());
             assert!(!manager.watch_network_folders());
+            assert_eq!(
+                manager.expanded_preview_style(),
+                ExpandedPreviewStyle::Fullscreen
+            );
+            assert!(!manager.expanded_preview_shift_controls());
             assert_eq!(manager.thumbnail_workers(), 6);
             assert!(!manager.show_thumbnails());
             assert!(manager.stl_thumbnails());
@@ -1559,6 +1564,8 @@ fn all_preference_setters_publish_and_persist_without_duplicate_notifications() 
                 |m| m.set_unit_system(UnitSystem::Metric),
                 |m| m.set_preview_autoplay(false),
                 |m| m.set_watch_network_folders(true),
+                |m| m.set_expanded_preview_style(ExpandedPreviewStyle::Overlay),
+                |m| m.set_expanded_preview_shift_controls(true),
                 |m| m.set_thumbnail_workers(3),
                 |m| m.set_show_thumbnails(true),
                 |m| m.set_stl_thumbnails(false),
