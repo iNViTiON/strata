@@ -57,6 +57,7 @@ impl ViewState {
                 self.drop_active_depths.set(None);
             }
             BrowserEvent::Reset => {
+                self.end_jump_to_name();
                 self.suppress_scroll_after_drop.set(false);
                 self.pending_new_entry.take();
                 self.pending_location_credentials.take();

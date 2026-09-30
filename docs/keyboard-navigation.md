@@ -157,6 +157,36 @@ After copying or cutting files, a highlighted **Files on clipboard** pill appear
 
 The hints describe file-view controls; text fields, dialogs, and media previews retain their own keyboard behavior. Mode changes update both the footer and the reference immediately. Closing keyboard-opened help restores the previous focus.
 
+## Typing in the file list
+
+What plain letters do in the file list depends on two saved preferences under **Settings → General → Search & filtering**:
+
+- **Type to search** on (the default): the first letter opens the pane filter, seeded with that letter, and **/** opens it empty.
+- **Type to search** off: **Default typing mode** chooses what letters do.
+  - **Vim keys** (the default): **h** / **j** / **k** / **l** stay arrows and other letters do nothing. **/** starts jump mode with an empty prefix.
+  - **Jump to name**: any printable key except Space starts jump mode with that character, so **h** / **j** / **k** / **l** (and **y** / **p**) are ordinary letters. **/** also starts it with an empty prefix.
+
+[10xer mode](10xer-mode.md) has its own keys and ignores both preferences. Recursive search results keep their own behavior.
+
+Jump mode selects the first entry of the focused pane or column whose name starts with the typed prefix, and shows the prefix in a small indicator at the bottom-right of that pane:
+
+| Key | In jump mode |
+| --- | --- |
+| Letters, digits, punctuation | Extend the prefix and select the first match. |
+| Same letter again | With a one-letter prefix, select the next match instead of extending the prefix. |
+| **Ctrl+N** / **Ctrl+P** | Select the next / previous match, wrapping at either end. |
+| **Backspace** | Drop the last character and select the first match of the shorter prefix. On an empty prefix, leave jump mode without going up a folder. |
+| **Esc** | Leave jump mode and keep the selection. In the file chooser the next **Esc** closes it as usual. |
+| **Enter** | Open the selected entry and leave jump mode. |
+| Arrows, **Home** / **End**, **Page Up** / **Page Down**, **Tab**, and any shortcut | Leave jump mode, then do their usual job. |
+| **Space** | Toggle the quick preview; jump mode continues. |
+
+Matching is by prefix, case-insensitive and Unicode-aware, over the entries the pane displays: hidden files count only while they are shown, and an active filter is respected. A leading dot is part of the name, so **b** does not match `.bashrc` while **.b** does. With no match the selection stays put, the typed text is kept so **Backspace** can fix it, and the indicator uses the danger color.
+
+Jump mode started by a letter ends after about a second without a key press and clears the prefix. Jump mode started with **/** has no timeout and ends with **Esc** or one of the keys above. Both also end when you click, when focus leaves the file list, when you open another folder, and when a preference change turns jump mode off. The portal file chooser shares all of this.
+
+Keys are handled one press at a time, as Type to search is, so input methods that compose text are not supported yet.
+
 ## Arrows, the header, and the sidebar
 
 In Icons and List, plain arrows move interface focus rather than changing directories:
@@ -174,7 +204,7 @@ From the sidebar, Right returns to the item you left (or the current file view i
 
 **Settings → General → Browsing → Keep arrows in file list** (off by default) stops arrow keys from leaving the file list. Use **Ctrl+Shift+B** to focus the sidebar, or use the mouse. **Ctrl+\\** toggles it live. The file chooser respects the same preference.
 
-**Alt+Left / Alt+Right / Alt+Up** remain Back / Forward / Parent in every mode. In the default map, List/Columns retain Miller-column navigation: **Right enters folders or moves into an existing pane to the right**. On a focused file with no pane to the right, Right does nothing; it never opens or previews the file. **Enter** opens files; with **Type to search** off, `l` still activates. Backspace and the existing `h` / `l` directory shortcuts remain available. In [10xer mode](10xer-mode.md), arrows stay in the Columns, List, and Icons panes. **Tab** moves from the file list to the window header, where **Enter** / **Space** activate the focused control and **h** / **j** return to the files. **Ctrl+Shift+B** focuses a visible sidebar; a hidden sidebar stays hidden until the header toggle shows it. In the sidebar, **j** / **k** and **Up** / **Down** move between places and device controls, **l** / **Enter** / **Space** activate the focused one, and **h** / **Left** / **Backspace** return to the files without changing the selection. A **Tab** or arrow key from the footer still returns to the file list. List and Columns **l** / **→** open a directory or enter a file's preview when possible. Icons **h** / **j** / **k** / **l** and arrows always move to the next icon in that direction, including across search-result icons; they never preview or change location. On a file, **i** toggles the preview without moving focus. On a directory it opens the next Miller column without focusing it, or toggles the folder-peek popover in List and Icons.
+**Alt+Left / Alt+Right / Alt+Up** remain Back / Forward / Parent in every mode. In the default map, List/Columns retain Miller-column navigation: **Right enters folders or moves into an existing pane to the right**. On a focused file with no pane to the right, Right does nothing; it never opens or previews the file. **Enter** opens files; with **Type to search** off and **Vim keys** as the typing mode, `l` still activates. Backspace and the existing `h` / `l` directory shortcuts remain available. In [10xer mode](10xer-mode.md), arrows stay in the Columns, List, and Icons panes. **Tab** moves from the file list to the window header, where **Enter** / **Space** activate the focused control and **h** / **j** return to the files. **Ctrl+Shift+B** focuses a visible sidebar; a hidden sidebar stays hidden until the header toggle shows it. In the sidebar, **j** / **k** and **Up** / **Down** move between places and device controls, **l** / **Enter** / **Space** activate the focused one, and **h** / **Left** / **Backspace** return to the files without changing the selection. A **Tab** or arrow key from the footer still returns to the file list. List and Columns **l** / **→** open a directory or enter a file's preview when possible. Icons **h** / **j** / **k** / **l** and arrows always move to the next icon in that direction, including across search-result icons; they never preview or change location. On a file, **i** toggles the preview without moving focus. On a directory it opens the next Miller column without focusing it, or toggles the folder-peek popover in List and Icons.
 
 In Columns, the pane to the right mirrors keyboard selection like Finder: **Up/Down** onto a folder shows its contents without moving focus, onto a previewable file opens Quick Preview, and onto any other file closes the child pane. Pointer selection keeps the configured click behavior. **Settings → General → Browsing → Mirror columns selection** (on by default) toggles the mirroring. 10xer mode leaves that preference saved and does not mirror: cursor movement does not open a child column or a preview. **l** / **→** enters a directory or a file preview, and **i** toggles a file's preview or opens the next column / toggles folder peek for a directory. The saved value applies again after leaving the mode.
 
