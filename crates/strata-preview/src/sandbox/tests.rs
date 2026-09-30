@@ -19,6 +19,8 @@ mod validation;
 const MEDIA_PREVIEW: ParseOperation = ParseOperation::PreviewMedia(MediaPreviewSize {
     width: 640,
     height: 800,
+    expanded: false,
+    max_fps: 30,
 });
 const PDF_PREVIEW: ParseOperation = ParseOperation::PreviewPdf(PdfRenderSize {
     width: 640,

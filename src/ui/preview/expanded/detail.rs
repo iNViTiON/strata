@@ -13,8 +13,27 @@ impl PreviewState {
             return None;
         }
         let (width, height) = (self.content.width(), self.content.height());
-        (width > 0 && height > 0)
-            .then(|| MediaPreviewSize::for_viewport(width, height, self.pane.scale_factor().max(1)))
+        if width <= 0 || height <= 0 {
+            return None;
+        }
+        let mut size =
+            MediaPreviewSize::for_expanded_viewport(width, height, self.pane.scale_factor().max(1));
+        if let Some(monitor) = self.monitor() {
+            let scale = monitor.scale_factor().max(1);
+            let geometry = monitor.geometry();
+            size = size
+                .within(
+                    geometry.width().saturating_mul(scale),
+                    geometry.height().saturating_mul(scale),
+                )
+                .for_refresh_rate(monitor.refresh_rate());
+        }
+        Some(size)
+    }
+
+    fn monitor(&self) -> Option<gtk::gdk::Monitor> {
+        let surface = self.pane.native()?.surface()?;
+        WidgetExt::display(&self.pane).monitor_at_surface(&surface)
     }
 
     /// The detail rasters need right now: larger while the view is expanded.
