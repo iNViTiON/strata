@@ -40,7 +40,21 @@ plain arrows keep moving through files and Shift+arrows drive the preview.
 `main` and `nix-dev` follow upstream every six hours, and `release` is
 rebuilt after them. Details are in [NIX.md](https://github.com/iNViTiON/strata/blob/nix-dev/NIX.md).
 
-## Use it on NixOS
+## Use it with Nix
+
+Try it without installing:
+
+```bash
+nix run github:iNViTiON/strata/release \
+  --extra-substituters https://invition.cachix.org \
+  --extra-trusted-public-keys invition.cachix.org-1:UBnayz18duoQrchGIMu740K49/WVsaa8dThirDR/Hd4=
+```
+
+The two cache options download the prebuilt package instead of compiling it.
+Nix only honors them for trusted users (`trusted-users` in `nix.conf`);
+otherwise add the cache system-wide as below, or drop them and let it build.
+
+Install it from a flake:
 
 ```nix
 {
