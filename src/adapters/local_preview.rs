@@ -20,9 +20,10 @@ use crate::{
     sandbox::{Cancellation, MediaPreviewBackend, ParseOperation, PdfRenderSize},
     services::{
         LoadHandle, MediaPreviewSize, ModelFormat, ModelRender, Preview, PreviewContent,
-        PreviewEvent, PreviewProvider, PreviewRequest, SandboxedMedia, content_family,
-        document_kind, has_plain_text_extension, is_non_executable_extensionless_dotfile,
-        layout_document, normalize_preview_text, parse_document,
+        PreviewDetail, PreviewEvent, PreviewProvider, PreviewRequest, SandboxedMedia,
+        content_family, document_kind, has_plain_text_extension,
+        is_non_executable_extensionless_dotfile, layout_document, normalize_preview_text,
+        parse_document,
     },
 };
 
@@ -525,7 +526,11 @@ impl LocalPreviewProvider {
             } else { match content {
                 PreviewContent::Pdf { .. } => Some(ParseOperation::PreviewPdf(pdf_render_size(
                     request.media_size,
+                    request.detail,
                 ))),
+                PreviewContent::Image if request.detail.is_expanded() => {
+                    Some(ParseOperation::PreviewImageExpanded)
+                }
                 PreviewContent::Image => Some(ParseOperation::PreviewImage),
                 PreviewContent::Media => None,
                 PreviewContent::Text { .. }
@@ -539,7 +544,10 @@ impl LocalPreviewProvider {
             }};
             if let Some(operation) = &operation {
                 let staged = if entry.location.native_path().is_none() {
-                    if !matches!(operation, ParseOperation::PreviewImage) {
+                    if !matches!(
+                        operation,
+                        ParseOperation::PreviewImage | ParseOperation::PreviewImageExpanded
+                    ) {
                         emit(PreviewEvent::Failed {
                             request_id,
                             entry,
@@ -650,6 +658,7 @@ impl LocalPreviewProvider {
                     Ok(Ok(output)) if matches!(operation, ParseOperation::PreviewPdf(_)) => {
                         if let Some(mtime) = modified
                             && request.pdf_page == 0
+                            && !request.detail.is_expanded()
                         {
                             thumbnail_to_store = Some((path.clone(), mtime, output.data.clone()));
                         }
@@ -661,7 +670,10 @@ impl LocalPreviewProvider {
                         }
                     }
                     Ok(Ok(output)) => {
-                        if let Some(mtime) = modified.filter(|_| !matches!(operation, ParseOperation::PreviewCover(_))) {
+                        if let Some(mtime) = modified.filter(|_| {
+                            !request.detail.is_expanded()
+                                && !matches!(operation, ParseOperation::PreviewCover(_))
+                        }) {
                             thumbnail_to_store = Some((path.clone(), mtime, output.data.clone()));
                         }
                         PreviewContent::Rasterized { png: output.data }
@@ -818,8 +830,11 @@ impl LocalPreviewProvider {
     }
 }
 
-fn pdf_render_size(viewport: MediaPreviewSize) -> PdfRenderSize {
-    PdfRenderSize::for_viewport_width(viewport.width)
+fn pdf_render_size(viewport: MediaPreviewSize, detail: PreviewDetail) -> PdfRenderSize {
+    match detail {
+        PreviewDetail::Standard => PdfRenderSize::for_viewport_width(viewport.width),
+        PreviewDetail::Expanded { width } => PdfRenderSize::for_expanded_width(width),
+    }
 }
 
 async fn read_text(

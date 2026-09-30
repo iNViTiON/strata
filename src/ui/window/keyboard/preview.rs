@@ -313,7 +313,7 @@ impl Dispatcher {
 }
 
 /// Window-level commands that neither read nor change the listing.
-fn passes_through_preview(key: Key, mods: Modifiers) -> bool {
+pub(super) fn passes_through_preview(key: Key, mods: Modifiers) -> bool {
     let plain = mods.is_empty();
     let control = mods == Modifiers::CONTROL_MASK;
     let control_shift = mods == Modifiers::CONTROL_MASK | Modifiers::SHIFT_MASK;
