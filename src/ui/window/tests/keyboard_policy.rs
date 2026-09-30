@@ -298,6 +298,14 @@ fn type_to_search_uses_slash_to_open_an_empty_filter() {
         type_to_search_query(gtk::gdk::Key::slash, gtk::gdk::ModifierType::empty()),
         Some(TypeToSearchQuery::Empty)
     );
+    assert_eq!(
+        type_to_search_query(gtk::gdk::Key::slash, gtk::gdk::ModifierType::SHIFT_MASK),
+        Some(TypeToSearchQuery::Character('/'))
+    );
+    assert_eq!(
+        type_to_search_query(gtk::gdk::Key::question, gtk::gdk::ModifierType::SHIFT_MASK),
+        Some(TypeToSearchQuery::Character('?'))
+    );
 }
 
 #[test]
