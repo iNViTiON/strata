@@ -31,6 +31,7 @@
 {
   lib,
   rustPlatform,
+  toolchain,
   src,
   version,
   commit,
@@ -125,6 +126,8 @@ rustPlatform.buildRustPackage {
 
   # The suite drives real GTK widgets and Bubblewrap, which the build sandbox lacks.
   doCheck = false;
+
+  disallowedReferences = [ toolchain ];
 
   postInstall = ''
     install -Dm644 data/io.github.lgse.Strata.desktop \
