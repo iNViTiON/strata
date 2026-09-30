@@ -17,6 +17,7 @@ mod file_commands;
 mod folder_jump;
 mod footer_prompt;
 mod go_prompt;
+mod jump_to_name;
 mod place_chords;
 mod preview_ownership;
 
@@ -82,6 +83,7 @@ impl KeyboardFixture {
         let preferences = PreferenceManager::shared();
         preferences.set_sidebar_show_home(true);
         preferences.set_tenxer_mode(false);
+        preferences.set_typing_mode(crate::ui::preferences::TypingMode::VimKeys);
         let directory = tempfile::tempdir().expect("fixture");
         for name in ["a.txt", "b.txt", "c.txt"] {
             std::fs::write(directory.path().join(name), b"preview").expect("fixture file");
