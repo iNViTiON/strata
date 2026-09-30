@@ -1787,6 +1787,23 @@ impl BrowserView {
         true
     }
 
+    /// The focused entry with the entries displayed directly before and after
+    /// it, as `[previous, next]`, in the order its pane shows them. Search
+    /// results have no such neighbors.
+    pub(crate) fn focused_with_neighbors(&self) -> Option<(FileEntry, [Option<FileEntry>; 2])> {
+        if self.selected_search_results().is_some() {
+            return None;
+        }
+        let (depth, source, focused) = self.state.browser.focused_item()?;
+        let order = self.displayed_order(depth)?;
+        let index = order.iter().position(|position| *position == source)?;
+        let entry_at = |offset: isize| {
+            let position = order.get(index.checked_add_signed(offset)?)?;
+            self.state.browser.entry_at(depth, *position)
+        };
+        Some((focused, [entry_at(-1), entry_at(1)]))
+    }
+
     fn focused_listing_depth(&self) -> Option<usize> {
         if self.view_mode() == BrowserMode::Columns {
             self.state

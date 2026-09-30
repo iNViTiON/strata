@@ -586,7 +586,9 @@ page render with verified page count. File-list thumbnail storage/reuse is uncha
 ## Scheduling and deadlines
 
 At most **four media sessions per application process** may own workers, across
-browser windows and choosers sharing that process. Each owns one parent reader
+browser windows and choosers sharing that process. Neighbor previews
+([below](#neighbor-preloading)) use a separate two-worker budget and never count
+against these four. Each owns one parent reader
 thread and at most two FFmpeg decoding processes. A fifth request reports busy
 instead of interrupting another player. The slot is retained through buffered
 playback, so a fifth player cannot steal it between GIF loops. A short 250-ms
@@ -607,6 +609,89 @@ have separate limits, not a machine-global scheduler.
 The old batch-conversion wall timeout does not govern a paused real-time player.
 The limits do not promise instant startup, zero-latency seeking, or a total RAM
 plateau for every toolkit/driver.
+
+## Neighbor preloading
+
+**Settings → General → Performance → Preload neighbor previews** is off by
+default. When on, and while a preview is open, the entries displayed directly
+above and below the selection are prepared in the background, so moving onto one
+needs no new decode. It costs CPU, memory and battery for files that may never be
+opened, which is why it is opt-in. Neighbors are the previous and next entries in
+the pane's display order (type groups and filters included) in Columns, List and
+Icons; search results have none.
+
+Only **local** images, PDFs and audio/video/GIF files are prepared. Models,
+covers, documents, text, archives and remote files are not.
+
+| Neighbor | Work | Ready when |
+| --- | --- | --- |
+| Image | one render in the preview pool | the PNG is in the preview cache |
+| PDF | page 0 in a one-shot sandbox, at the drawer's render size | the page is in the preview cache |
+| Video, audio, GIF | a normal sandboxed media worker | its first frame is decoded and the worker is parked |
+
+Every neighbor is an ordinary preview request with a lower priority: one file per
+sandbox, the same namespaces, resource limits, Landlock/seccomp policy, device
+exposure and wire validation as above. A parked worker is the normal worker
+blocked on its full pipe, so the queue bounds above still apply; there is no
+whole-clip cache, no extra mount, no audio output and negligible CPU use while
+parked. An audio/video neighbor holds its worker for as long as it stays a neighbor,
+and the two-worker budget is per process: a window that is in the background keeps
+its parked workers until its preview is hidden or its selection moves.
+
+### Scheduling
+
+- Work starts 150 ms after the current preview has settled (rendered, or its
+  first video frame decoded), after the drawer's opening animation, and only while
+  no thumbnail or metadata work is waiting or running. Otherwise it is retried every
+  250 ms for about six seconds, then at the next selection change. A neighbor whose
+  modification time the listing has not read yet waits the same way.
+- Hiding the preview (the pane is suspended or unmapped) drops all neighbors;
+  showing it again schedules them anew.
+- Each move recomputes the two neighbors. Matching work is kept; the rest is
+  dropped. Video workers are cancelled through the normal path. An image or PDF
+  render that has already started is left to finish (cancelling would kill the
+  pool supervisor and make the next render pay a cold start) and only fills the
+  cache.
+- Work is keyed by file (location and modification time) and by the presentation
+  it was made for: the drawer's decode size, and the preview detail once the
+  expanded preview exists. A change of presentation drops the preloads and asks
+  for new ones; a parked worker is never resized in place.
+- Selecting a ready neighbor skips the 75 ms focus debounce, unless selections are
+  arriving less than 150 ms apart (key repeat).
+- Preloading is skipped while the preview cache holds more than 75 % of its byte
+  budget, so a neighbor cannot evict the page being read.
+
+### Budgets and priority
+
+Current work always wins:
+
+- **Media:** at most two parked workers per process, on their own counter next to
+  the four interactive ones (at most six sessions, each still at most two FFmpeg
+  processes). Promoting a parked worker moves it onto the interactive budget with
+  no restart. If four players are already running, promotion fails and the file
+  starts normally, reporting "busy" as before. A parked worker wakes every 50 ms
+  instead of every 10 ms.
+- **Image pool:** a neighbor render is admitted only when no thumbnail, metadata or
+  interactive request is waiting, when a worker remains free after admission, and
+  when no other neighbor is running. With **Thumbnail workers** set to 1 there are
+  no image neighbors. An interactive request for the same file waits for the
+  finished render through the pool's existing in-flight gate.
+- **Heavy previews (PDF):** the single permit is now served in three ranks:
+  interactive requests (including the first page of the current PDF), then
+  neighbors, then the queued later pages of the open document. A neighbor never
+  overtakes interactive work: an interactive request that finds a neighbor render
+  running cancels its helper at once, and one for the neighbor's own page waits for
+  that render instead of repeating it.
+
+Measured on a 1440×900 headless display with software decoding (see
+[performance-baseline.md](performance-baseline.md)), a parked worker holds about
+105 MiB (1080p H.264) to 236 MiB (4K HEVC) of resident memory; with VA-API the
+decode surfaces add about 35 to 115 MiB of GPU-mapped memory. Two neighbors double
+that. The setting's description states this cost.
+
+Not included in this version: turning the previous current preview into a parked
+neighbor when moving on (moving back therefore starts that file's preload again),
+remote files, and search results.
 
 ## Isolation and hardware policy
 

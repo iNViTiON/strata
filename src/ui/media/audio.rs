@@ -14,6 +14,28 @@ const FRAME_BYTES: usize = 4;
 const MAX_CHUNK_BYTES: usize = 6_400;
 const MAX_CHUNK_NS: u64 = 33_333_334;
 
+/// Loads GStreamer and probes the audio sink once, off the GTK thread, so the
+/// first player does not pay for it (hundreds of milliseconds when cold).
+pub(super) fn prewarm() {
+    #[cfg(not(test))]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = std::thread::Builder::new()
+                .name("audio-prewarm".into())
+                .spawn(|| {
+                    if gst::init().is_err() {
+                        return;
+                    }
+                    if let Ok(sink) = gst::ElementFactory::make("autoaudiosink").build() {
+                        let _ = sink.set_state(gst::State::Ready);
+                        let _ = sink.set_state(gst::State::Null);
+                    }
+                });
+        });
+    }
+}
+
 pub(super) struct PcmOutput {
     pipeline: gst::Pipeline,
     source: AppSrc,

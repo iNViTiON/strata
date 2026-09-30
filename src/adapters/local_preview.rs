@@ -20,8 +20,8 @@ use crate::{
     sandbox::{Cancellation, MediaPreviewBackend, ParseOperation, PdfRenderSize},
     services::{
         LoadHandle, MediaPreviewSize, ModelFormat, ModelRender, Preview, PreviewContent,
-        PreviewDetail, PreviewEvent, PreviewProvider, PreviewRequest, SandboxedMedia,
-        content_family, document_kind, has_plain_text_extension,
+        PreviewDetail, PreviewEvent, PreviewPriority, PreviewProvider, PreviewRequest,
+        SandboxedMedia, content_family, document_kind, has_plain_text_extension,
         is_non_executable_extensionless_dotfile, layout_document, normalize_preview_text,
         parse_document,
     },
@@ -31,11 +31,22 @@ const MAX_PREVIEW_CACHE_ENTRIES: usize = 64;
 const MAX_PREVIEW_CACHE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_CONCURRENT_HEAVY_PREVIEWS: usize = 1;
 
+/// Lower ranks are served first. A neighbor never overtakes interactive work
+/// but does run before the queued later pages of the document being read.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum HeavyRank {
+    Interactive,
+    Neighbor,
+    LaterPage,
+}
+
 #[derive(Default)]
 struct HeavyPreviewQueue {
     running: usize,
     next_id: u64,
-    queued: VecDeque<(u64, oneshot::Sender<HeavyPreviewPermit>)>,
+    queued: VecDeque<(u64, HeavyRank, oneshot::Sender<HeavyPreviewPermit>)>,
+    // Cancels the neighbor render holding the permit, so interactive work never waits for it.
+    neighbor_running: Option<Cancellation>,
 }
 
 struct HeavyPreviewWaiter {
@@ -52,7 +63,7 @@ impl HeavyPreviewWaiter {
 impl Drop for HeavyPreviewWaiter {
     fn drop(&mut self) {
         HEAVY_PREVIEW_QUEUE.with(|queue| {
-            queue.borrow_mut().queued.retain(|(id, _)| *id != self.id);
+            queue.borrow_mut().queued.retain(|(id, ..)| *id != self.id);
         });
     }
 }
@@ -66,6 +77,10 @@ impl Drop for HeavyPreviewPermit {
 }
 
 fn request_heavy_preview_permit() -> HeavyPreviewWaiter {
+    request_ranked_heavy_permit(HeavyRank::Interactive)
+}
+
+fn request_ranked_heavy_permit(rank: HeavyRank) -> HeavyPreviewWaiter {
     let (send, receive) = oneshot::channel();
     let (id, start) = HEAVY_PREVIEW_QUEUE.with(|queue| {
         let mut queue = queue.borrow_mut();
@@ -75,7 +90,12 @@ fn request_heavy_preview_permit() -> HeavyPreviewWaiter {
             queue.running += 1;
             (id, Some(send))
         } else {
-            queue.queued.push_back((id, send));
+            if rank == HeavyRank::Interactive
+                && let Some(neighbor) = &queue.neighbor_running
+            {
+                neighbor.cancel();
+            }
+            queue.queued.push_back((id, rank, send));
             (id, None)
         }
     });
@@ -94,7 +114,15 @@ fn release_heavy_preview_permit() {
     let next = HEAVY_PREVIEW_QUEUE.with(|queue| {
         let mut queue = queue.borrow_mut();
         queue.running = queue.running.saturating_sub(1);
-        let next = queue.queued.pop_front().map(|(_, send)| send);
+        queue.neighbor_running = None;
+        let next = queue
+            .queued
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (id, rank, _))| (*rank, *id))
+            .map(|(index, _)| index)
+            .and_then(|index| queue.queued.remove(index))
+            .map(|(_, _, send)| send);
         if next.is_some() {
             queue.running += 1;
         }
@@ -105,6 +133,87 @@ fn release_heavy_preview_permit() {
     {
         drop(permit);
     }
+}
+
+/// A neighbor's heavy render, which the interactive request for the same
+/// page joins rather than repeating.
+struct NeighborRender {
+    token: u64,
+    running: bool,
+    cancel: Cancellation,
+    waiters: Vec<oneshot::Sender<()>>,
+}
+
+struct NeighborRenderGuard {
+    key: PreviewCacheKey,
+    token: u64,
+}
+
+impl Drop for NeighborRenderGuard {
+    fn drop(&mut self) {
+        let finished = NEIGHBOR_RENDERS.with(|renders| {
+            let mut renders = renders.borrow_mut();
+            renders
+                .get(&self.key)
+                .is_some_and(|render| render.token == self.token)
+                .then(|| renders.remove(&self.key))
+                .flatten()
+        });
+        for waiter in finished.into_iter().flat_map(|render| render.waiters) {
+            let _ = waiter.send(());
+        }
+    }
+}
+
+fn begin_neighbor_render(
+    key: &PreviewCacheKey,
+    cancel: &Cancellation,
+) -> Option<NeighborRenderGuard> {
+    NEIGHBOR_RENDERS.with(|renders| {
+        let mut renders = renders.borrow_mut();
+        if renders.contains_key(key) {
+            return None;
+        }
+        let token = NEXT_NEIGHBOR_TOKEN.with(|next| next.replace(next.get().wrapping_add(1)));
+        renders.insert(
+            key.clone(),
+            NeighborRender {
+                token,
+                running: false,
+                cancel: cancel.clone(),
+                waiters: Vec::new(),
+            },
+        );
+        Some(NeighborRenderGuard {
+            key: key.clone(),
+            token,
+        })
+    })
+}
+
+fn mark_neighbor_running(key: &PreviewCacheKey, cancel: &Cancellation) {
+    NEIGHBOR_RENDERS.with(|renders| {
+        if let Some(render) = renders.borrow_mut().get_mut(key) {
+            render.running = true;
+        }
+    });
+    HEAVY_PREVIEW_QUEUE.with(|queue| queue.borrow_mut().neighbor_running = Some(cancel.clone()));
+}
+
+/// An interactive request for a page a neighbor is rendering waits for it; if
+/// the neighbor has not started, it is dropped and the request renders itself.
+fn join_neighbor_render(key: &PreviewCacheKey) -> Option<oneshot::Receiver<()>> {
+    NEIGHBOR_RENDERS.with(|renders| {
+        let mut renders = renders.borrow_mut();
+        let render = renders.get_mut(key)?;
+        if !render.running {
+            render.cancel.cancel();
+            return None;
+        }
+        let (send, receive) = oneshot::channel();
+        render.waiters.push(send);
+        Some(receive)
+    })
 }
 
 struct PreviewCache {
@@ -177,6 +286,8 @@ fn preview_content_size(content: &PreviewContent) -> usize {
 
 thread_local! {
     static HEAVY_PREVIEW_QUEUE: RefCell<HeavyPreviewQueue> = RefCell::new(HeavyPreviewQueue::default());
+    static NEIGHBOR_RENDERS: RefCell<HashMap<PreviewCacheKey, NeighborRender>> = RefCell::new(HashMap::new());
+    static NEXT_NEIGHBOR_TOKEN: Cell<u64> = const { Cell::new(0) };
     static PREVIEW_CACHE: RefCell<PreviewCache> = RefCell::new(PreviewCache {
         entries: HashMap::new(),
         recent: VecDeque::new(),
@@ -197,6 +308,15 @@ impl LocalPreviewProvider {
 }
 
 impl PreviewProvider for LocalPreviewProvider {
+    fn preload(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle {
+        self.load_prioritized(
+            request,
+            emit,
+            crate::sandbox::parse_neighbor,
+            PreviewPriority::Neighbor,
+        )
+    }
+
     fn load(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle {
         use futures_lite::StreamExt;
         if !crate::services::is_model(&request.entry.native_name) {
@@ -249,6 +369,25 @@ impl LocalPreviewProvider {
         + Send
         + 'static,
     ) -> LoadHandle {
+        self.load_prioritized(request, emit, render, PreviewPriority::Current)
+    }
+
+    fn load_prioritized(
+        &self,
+        request: PreviewRequest,
+        emit: Rc<dyn Fn(PreviewEvent)>,
+        render: impl FnOnce(
+            &Path,
+            ParseOperation,
+            i32,
+            MediaPreviewBackend,
+            &Cancellation,
+        ) -> Result<crate::sandbox::ParseOutput, String>
+        + Send
+        + 'static,
+        priority: PreviewPriority,
+    ) -> LoadHandle {
+        let neighbor = priority == PreviewPriority::Neighbor;
         let media_preview_backend = (self.media_preview_backend)();
         let request_id = request.id;
         let entry = request.entry.clone();
@@ -257,6 +396,12 @@ impl LocalPreviewProvider {
         let abort_safe = Rc::new(Cell::new(true));
         let abort_safe_for_task = abort_safe.clone();
         let task = glib::MainContext::default().spawn_local(async move {
+            if neighbor
+                && (entry.location.native_path().is_none()
+                    || crate::services::preload_kind(&entry.native_name).is_none())
+            {
+                return;
+            }
             let (guessed_type, uncertain) =
                 gio::content_type_guess(Some(Path::new(&entry.native_name)), None::<&[u8]>);
             let mut content_type = guessed_type.to_string();
@@ -619,20 +764,72 @@ impl LocalPreviewProvider {
                     return;
                 }
 
-                let heavy_permit = if matches!(operation, ParseOperation::PreviewPdf(_) | ParseOperation::PreviewModel(_) | ParseOperation::PreviewCover(_)) {
-                    let Some(permit) = request_heavy_preview_permit().acquire().await else {
+                let heavy = matches!(operation, ParseOperation::PreviewPdf(_) | ParseOperation::PreviewModel(_) | ParseOperation::PreviewCover(_));
+                // A neighbor must not evict the page being read from the cache.
+                if neighbor
+                    && PREVIEW_CACHE.with(|cache| cache.borrow().byte_count > MAX_PREVIEW_CACHE_BYTES / 4 * 3)
+                {
+                    return;
+                }
+                let neighbor_cancel = Cancellation::default();
+                let mut neighbor_render = None;
+                if heavy {
+                    if let Some(key) = cache_key.as_ref() {
+                        if neighbor {
+                            let Some(guard) = begin_neighbor_render(key, &neighbor_cancel) else {
+                                return;
+                            };
+                            neighbor_render = Some(guard);
+                        } else if let Some(joined) = join_neighbor_render(key) {
+                            let _ = joined.await;
+                            if cancellation_for_task.is_cancelled() {
+                                return;
+                            }
+                            if let Some(cached) = PREVIEW_CACHE.with(|cache| cache.borrow_mut().get(key)) {
+                                emit(PreviewEvent::Ready(Preview {
+                                    request_id,
+                                    entry,
+                                    content_type,
+                                    content: cached,
+                                }));
+                                return;
+                            }
+                        }
+                    } else if neighbor {
+                        return;
+                    }
+                }
+
+                let heavy_permit = if heavy {
+                    let rank = if neighbor {
+                        HeavyRank::Neighbor
+                    } else if matches!(operation, ParseOperation::PreviewPdf(_)) && request.pdf_page > 0 {
+                        HeavyRank::LaterPage
+                    } else {
+                        HeavyRank::Interactive
+                    };
+                    let Some(permit) = request_ranked_heavy_permit(rank).acquire().await else {
                         return;
                     };
-                    if cancellation_for_task.is_cancelled() {
+                    if cancellation_for_task.is_cancelled() || neighbor_cancel.is_cancelled() {
                         return;
+                    }
+                    if neighbor && let Some(key) = cache_key.as_ref() {
+                        mark_neighbor_running(key, &neighbor_cancel);
                     }
                     Some(permit)
                 } else {
                     None
                 };
-                abort_safe_for_task.set(heavy_permit.is_none());
+                // Neighbor work that has begun runs to completion, unless interactive
+                // work preempts it, so its result still lands in the cache.
+                abort_safe_for_task.set(heavy_permit.is_none() && !neighbor);
                 let value = request.pdf_page;
-                let cancellation = cancellation_for_task.clone();
+                let cancellation = if neighbor && heavy {
+                    neighbor_cancel.clone()
+                } else {
+                    cancellation_for_task.clone()
+                };
                 let spawn_path = path.clone();
                 let mut thumbnail_to_store = None;
                 let for_render = operation.clone();
@@ -649,7 +846,12 @@ impl LocalPreviewProvider {
                 })
                 .await;
                 abort_safe_for_task.set(true);
-                if cancellation_for_task.is_cancelled() {
+                let abandoned = match (neighbor, heavy) {
+                    (true, true) => neighbor_cancel.is_cancelled(),
+                    (true, false) => false,
+                    (false, _) => cancellation_for_task.is_cancelled(),
+                };
+                if abandoned {
                     return;
                 }
                 content = match render {
@@ -705,6 +907,7 @@ impl LocalPreviewProvider {
                         cache.borrow_mut().insert(cache_key, content.clone());
                     });
                 }
+                drop(neighbor_render);
                 emit(PreviewEvent::Ready(Preview {
                     request_id,
                     entry,

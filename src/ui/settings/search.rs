@@ -36,6 +36,12 @@ const TARGETS: &[Target] = &[
         aliases: "performance parallel concurrency cpu memory sandbox decoder pool",
     },
     Target {
+        id: "preload-previews",
+        page: "general",
+        title: "Preload neighbor previews",
+        aliases: "performance prefetch adjacent next previous video image pdf memory battery instant",
+    },
+    Target {
         id: "default-directory",
         page: "general",
         title: "Default directory",
