@@ -29,6 +29,8 @@
       miseLock = builtins.fromTOML (builtins.readFile ./mise.lock);
       rustPin = miseConfig.tools.rust;
 
+      rustMinimal = pkgs.rust-bin.stable.${rustPin.version}.minimal;
+
       rust = pkgs.rust-bin.stable.${rustPin.version}.default.override {
         extensions = lib.unique ((rustPin.components or [ ]) ++ [ "rust-src" ]);
       };
@@ -210,10 +212,12 @@
       shortRev = self.shortRev or self.dirtyShortRev or "unknown";
 
       strata = pkgs.callPackage ./nix/package.nix {
+        # rust-src would make std's panic locations point into the store.
         rustPlatform = pkgs.makeRustPlatform {
-          cargo = rust;
-          rustc = rust;
+          cargo = rustMinimal;
+          rustc = rustMinimal;
         };
+        toolchain = rustMinimal;
         version = "${cargoManifest.package.version}+fork.${shortRev}";
         commit = self.rev or self.dirtyRev or "unknown";
         src = lib.fileset.toSource {
