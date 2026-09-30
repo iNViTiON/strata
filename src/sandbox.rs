@@ -767,9 +767,13 @@ fn sandbox_command(
         &sandbox_input,
     ]);
     if let ParseOperation::PreviewMedia(size) = operation {
-        let size = MediaPreviewSize::new(size.width, size.height);
+        let size = size.normalized();
         command.arg("/dev/stdout");
-        command.arg(format!("{}x{}", size.width, size.height));
+        command.arg(if size.expanded {
+            format!("{}x{}:e@{}", size.width, size.height, size.max_fps)
+        } else {
+            format!("{}x{}", size.width, size.height)
+        });
     } else {
         command.arg(format!("/output/{}", operation.output_name()));
         let value = match operation {

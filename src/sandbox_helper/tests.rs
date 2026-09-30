@@ -9,9 +9,9 @@ use gdk_pixbuf::prelude::*;
 
 use super::{
     bounded_output, bounded_output_with_timeout, bounded_surface_dimensions,
-    exceeds_decoded_frame_budget, is_svg_head, pdf_render_request, read_exif_thumbnail,
-    read_limited, render_pixbuf, render_raw, render_raw_thumbnail, render_simple_dcraw, run,
-    scale_embedded_thumbnail, svg_source,
+    exceeds_decoded_frame_budget, is_svg_head, media_preview_size, pdf_render_request,
+    read_exif_thumbnail, read_limited, render_pixbuf, render_raw, render_raw_thumbnail,
+    render_simple_dcraw, run, scale_embedded_thumbnail, svg_source,
 };
 
 #[test]
@@ -898,4 +898,30 @@ fn expanded_image_previews_keep_far_more_pixels_than_the_drawer() {
         (400, 300),
         "a small image keeps its native size"
     );
+}
+
+#[test]
+fn a_media_size_argument_keeps_the_expanded_ceiling_and_scaling() {
+    let drawer = media_preview_size("2600x1600").expect("drawer size");
+    assert_eq!(
+        (drawer.width, drawer.height, drawer.expanded),
+        (1280, 1280, false)
+    );
+
+    let expanded = media_preview_size("2600x1600:e@60").expect("expanded size");
+    assert_eq!(
+        (expanded.width, expanded.height, expanded.expanded),
+        (2600, 1600, true)
+    );
+    assert_eq!(expanded.max_fps, 60);
+    assert_eq!(
+        media_preview_size("2600x1600:e@30")
+            .expect("slow screen")
+            .max_fps,
+        30
+    );
+    assert!(media_preview_size("2600x1600:e@fast").is_err());
+
+    assert_eq!(media_preview_size("0").expect("legacy size").width, 1280);
+    assert!(media_preview_size("wide:e").is_err());
 }
