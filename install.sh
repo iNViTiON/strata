@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-REPOSITORY="lgse/strata"
+REPOSITORY="iNViTiON/strata"
 APP_ID="io.github.lgse.Strata"
 MIN_GLIBC="2.39"
 REQUIRED_PACKAGES=(
@@ -200,14 +200,15 @@ detect_omarchy_major() {
   return 0
 }
 
-latest_stable_version() {
+latest_release_version() {
   local effective tag
   effective=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
     "https://github.com/$REPOSITORY/releases/latest") \
-    || die "Could not find the latest stable Strata release."
+    || die "Could not find the latest Strata release."
   tag=${effective##*/}
-  [[ $tag =~ ^v([0-9]+[.][0-9]+[.][0-9]+)$ ]] \
-    || die "GitHub returned an unexpected stable release tag: $tag"
+  # The fork publishes nightly builds only, each marked as the latest release.
+  [[ $tag =~ ^v([0-9]+[.][0-9]+[.][0-9]+-nightly[.][0-9]{8}([.][0-9]+)?)$ ]] \
+    || die "GitHub returned an unexpected release tag: $tag"
   printf '%s\n' "${BASH_REMATCH[1]}"
 }
 
@@ -515,13 +516,13 @@ main() {
     command -v "$command" >/dev/null 2>&1 || die "Required command not found: $command"
   done
 
-  version=$(latest_stable_version)
+  version=$(latest_release_version)
   archive="strata-$version-$target.tar.gz"
   url="https://github.com/$REPOSITORY/releases/download/v$version"
   TEMP_DIR=$(mktemp -d)
   trap 'rm -rf -- "$TEMP_DIR"' EXIT
 
-  info "Downloading stable Strata v$version"
+  info "Downloading Strata v$version"
   curl --fail --location --show-error --progress-bar \
     --output "$TEMP_DIR/$archive" "$url/$archive"
   curl --fail --location --show-error --progress-bar \
@@ -575,7 +576,7 @@ main() {
   configure_udiskie_unlock "$extracted" "$omarchy_major" "$arch_based"
 
   info "Installation complete"
-  printf 'Installed Strata v%s from the stable release.\n' "$version"
+  printf 'Installed Strata v%s from the latest fork release.\n' "$version"
   if [[ -r $extracted/SOURCE_COMMIT ]]; then
     printf 'Source commit: %s\n' "$(<"$extracted/SOURCE_COMMIT")"
   fi
