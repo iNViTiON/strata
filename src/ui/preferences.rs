@@ -49,6 +49,14 @@ pub(crate) enum TypingMode {
     JumpToName,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ExpandedPreviewStyle {
+    #[default]
+    Overlay,
+    Fullscreen,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(in crate::ui) struct Preferences {
     mode: String,
@@ -145,6 +153,10 @@ pub(in crate::ui) struct Preferences {
     preview_autoplay: bool,
     #[serde(default)]
     preload_neighbor_previews: bool,
+    #[serde(default)]
+    expanded_preview_style: ExpandedPreviewStyle,
+    #[serde(default = "default_enabled")]
+    expanded_preview_shift_controls: bool,
     #[serde(default)]
     auto_refresh_interval: u32,
     #[serde(default = "crate::sandbox::browser::default_worker_limit")]
@@ -249,6 +261,8 @@ impl Default for Preferences {
             preview_text_wrap: false,
             preview_autoplay: false,
             preload_neighbor_previews: false,
+            expanded_preview_style: ExpandedPreviewStyle::default(),
+            expanded_preview_shift_controls: true,
             auto_refresh_interval: 0,
             thumbnail_workers: crate::sandbox::browser::default_worker_limit(),
             icons_thumbnail_size: default_icons_thumbnail_size(),
@@ -799,6 +813,26 @@ impl PreferenceManager {
 
     pub fn set_preload_neighbor_previews(&self, enabled: bool) {
         self.preferences.borrow_mut().preload_neighbor_previews = enabled;
+        self.save_preferences();
+    }
+
+    pub fn expanded_preview_style(&self) -> ExpandedPreviewStyle {
+        self.preferences.borrow().expanded_preview_style
+    }
+
+    pub fn set_expanded_preview_style(&self, style: ExpandedPreviewStyle) {
+        self.preferences.borrow_mut().expanded_preview_style = style;
+        self.save_preferences();
+    }
+
+    pub fn expanded_preview_shift_controls(&self) -> bool {
+        self.preferences.borrow().expanded_preview_shift_controls
+    }
+
+    pub fn set_expanded_preview_shift_controls(&self, shift_controls: bool) {
+        self.preferences
+            .borrow_mut()
+            .expanded_preview_shift_controls = shift_controls;
         self.save_preferences();
     }
 
