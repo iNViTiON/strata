@@ -85,6 +85,7 @@ pub(in crate::ui) fn non_default_preferences() -> Preferences {
         watch_network_folders: false,
         expanded_preview_style: ExpandedPreviewStyle::Fullscreen,
         expanded_preview_shift_controls: false,
+        preload_neighbor_previews: true,
         thumbnail_workers: 6,
         show_thumbnails: false,
         icons_thumbnail_size: 128,
