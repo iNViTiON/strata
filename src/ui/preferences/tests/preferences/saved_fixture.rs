@@ -223,7 +223,7 @@ fn assert_saved_views_and_updates(manager: &PreferenceManager) {
             manager.checks_for_updates(),
             manager.release_channel(),
         ),
-        (false, false, Channel::Nightly),
+        (false, false, Channel::Preview),
         "(remember folder views, update checks, release channel)"
     );
 }

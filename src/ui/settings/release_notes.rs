@@ -181,7 +181,7 @@ pub(super) fn release_notes_card(
     let notes = gtk::Box::new(gtk::Orientation::Vertical, 6);
     set_release_notes_message(&notes, initial);
     let fallback = gtk::LinkButton::with_label(
-        "https://github.com/lgse/strata/releases",
+        "https://github.com/iNViTiON/strata/releases",
         &crate::i18n::tr("View on GitHub"),
     );
     fallback.set_has_tooltip(false);
