@@ -161,7 +161,9 @@ class InstallerFixture:
         self.environment.pop("NO_COLOR", None)
         target = subprocess.check_output(["uname", "-m"], text=True).strip()
         target = "aarch64" if target in ("aarch64", "arm64") else "x86_64"
-        self.archive_name = f"strata-1.0.0-{target}-unknown-linux-gnu.tar.gz"
+        self.version = "1.0.0-nightly.20260101"
+        self.downloads = f"https://github.com/iNViTiON/strata/releases/download/v{self.version}"
+        self.archive_name = f"strata-{self.version}-{target}-unknown-linux-gnu.tar.gz"
         archive = self.release / self.archive_name
         with tarfile.open(archive, "w:gz") as bundle:
             files = {
@@ -182,7 +184,7 @@ class InstallerFixture:
                 member.mode = 0o755 if name == "strata" else 0o644
                 bundle.addfile(member, io.BytesIO(encoded))
         other = "aarch64" if target == "x86_64" else "x86_64"
-        (self.release / f"strata-1.0.0-{other}-unknown-linux-gnu.tar.gz").write_bytes(b"other architecture\n")
+        (self.release / f"strata-{self.version}-{other}-unknown-linux-gnu.tar.gz").write_bytes(b"other architecture\n")
         self.sign_release()
         self.environment["FIXTURE_ARCHIVE"] = str(archive)
         self.environment["FIXTURE_RELEASE"] = str(self.release)
@@ -197,7 +199,7 @@ while (($#)); do
 done
 printf "curl %s\\n" "$url" >> "$CALLS"
 case $url in
-  */latest) printf 'https://github.com/lgse/strata/releases/tag/v1.0.0' ;;
+  */latest) printf 'https://github.com/iNViTiON/strata/releases/tag/v1.0.0-nightly.20260101' ;;
   *.tar.gz) cp "$FIXTURE_ARCHIVE" "$output" ;;
   *) [[ -f $FIXTURE_RELEASE/${url##*/} ]] || exit 22; cp "$FIXTURE_RELEASE/${url##*/}" "$output" ;;
 esac
@@ -225,8 +227,8 @@ exec "$@"
         path.write_text("#!/bin/bash\nset -euo pipefail\n" + body, encoding="utf-8")
         path.chmod(0o755)
 
-    def sign_release(self, version: str = "1.0.0") -> None:
-        manifest = signing.manifest_bytes(self.release, version, "b" * 40)
+    def sign_release(self) -> None:
+        manifest = signing.manifest_bytes(self.release, self.version, "b" * 40)
         signatures = signing.sign_manifest(manifest, [self.signing_key], [self.signing_public_key])
         (self.release / signing.MANIFEST_NAME).write_bytes(manifest)
         (self.release / signing.SIGNATURES_NAME).write_bytes(signatures)
@@ -637,11 +639,11 @@ class InstallerTests(unittest.TestCase):
         with InstallerFixture() as fixture:
             result = fixture.run("--non-interactive")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            downloads = "https://github.com/lgse/strata/releases/download/v1.0.0"
+            downloads = fixture.downloads
             self.assertEqual(
                 [call for call in fixture.recorded_calls() if call.startswith("curl")],
                 [
-                    "curl https://github.com/lgse/strata/releases/latest",
+                    "curl https://github.com/iNViTiON/strata/releases/latest",
                     f"curl {downloads}/strata-update-manifest.json",
                     f"curl {downloads}/strata-update-manifest.signatures.json",
                     f"curl {downloads}/{fixture.archive_name}",
@@ -850,7 +852,7 @@ class InstallerTests(unittest.TestCase):
             terminal = fixture.terminal()
             terminal.expect("Enter continue")
             terminal.send(b"\r")
-            terminal.expect("Download Strata 1.0.0")
+            terminal.expect("Download Strata 1.0.0-nightly.20260101")
             deadline = time.monotonic() + 3
             while not child_pid.exists() and time.monotonic() < deadline:
                 terminal.read()
@@ -875,7 +877,7 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("xdg-desktop-portal", transactions[0])
             self.assertEqual(fixture.recorded_application_calls(), [f"{fixture.home}/.local/bin/strata --install-portal"])
             self.assertLess(
-                calls.index(f"curl https://github.com/lgse/strata/releases/download/v1.0.0/{fixture.archive_name}"),
+                calls.index(f"curl {fixture.downloads}/{fixture.archive_name}"),
                 calls.index(transactions[0]),
             )
 
