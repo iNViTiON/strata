@@ -50,6 +50,14 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 
+      # Pull only; the push below runs for published builds alone, while the
+      # daemon mode would upload during the build, even from failed runs.
+      - name: Use the Cachix cache
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: invition
+          skipPush: true
+
       - name: Assemble, check and publish
         id: assemble
         env:
@@ -69,6 +77,16 @@ jobs:
           set -e
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
+
+      # Cachix skips paths cache.nixos.org already serves, so this uploads only
+      # what the fork builds itself. Consumers hit it only when they evaluate the
+      # same derivation: `release` with this flake.lock, no nixpkgs follows.
+      - name: Upload the published package to Cachix
+        if: steps.assemble.outputs.tag != ''
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
+        run: nix build .#strata --no-link --print-out-paths | cachix push invition
 
       - name: Report the failed release in an issue
         if: failure()
