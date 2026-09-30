@@ -9,6 +9,7 @@ use super::{
 use crate::sandbox::{
     DocumentFormat, MediaPreviewBackend, ParseOperation, PdfRenderSize, runtime, sandbox_input_path,
 };
+use crate::services::MediaPreviewSize;
 
 const ISOLATED: &str = "--unshare-all --die-with-parent --new-session --clearenv";
 const SOFTWARE_LIMITS: &str = "--as=2147483648 --cpu=10";
@@ -285,8 +286,19 @@ fn media_previews_use_bounded_streaming_instead_of_driver_wide_resource_limits()
         &joined,
         &[
             "--size 536870912 --tmpfs /tmp",
-            "preview-media /input.mkv /dev/stdout",
+            "preview-media /input.mkv /dev/stdout 640x800 ",
         ],
+    );
+
+    let joined = Sandbox::new(
+        "/home/alice/Videos/untrusted.mkv",
+        ParseOperation::PreviewMedia(MediaPreviewSize::expanded(2600, 1600)),
+    )
+    .backend(MediaPreviewBackend::Automatic)
+    .joined();
+    assert!(
+        joined.contains("preview-media /input.mkv /dev/stdout 2600x1600:e@60 "),
+        "the expanded size is not clamped to the drawer's: {joined}"
     );
 }
 

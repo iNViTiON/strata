@@ -147,10 +147,11 @@ fn audible(block: &[u8]) -> bool {
 
 /// The PCM block for the audio tick `offset` ticks after the first frame; the
 /// lead places it in the first record or ahead of its own frame.
-fn audio_block(frames: &[Frame], offset: usize) -> &[u8] {
-    let lead = media::AUDIO_LEAD_TICKS as usize;
+fn audio_block(header: Header, frames: &[Frame], offset: usize) -> &[u8] {
+    let lead = header.audio_lead_ticks() as usize;
+    let block = header.audio_bytes();
     if offset <= lead {
-        &frames[0].samples[offset * AUDIO_BYTES..(offset + 1) * AUDIO_BYTES]
+        &frames[0].samples[offset * block..(offset + 1) * block]
     } else {
         &frames[offset - lead].samples
     }
@@ -235,11 +236,14 @@ fn sample_input(start_tick: u32, raw_video: bool) -> Input {
             audio: true,
             duration_us: 3_600_000_000,
             start_tick,
+            fps: 30,
+            native_fps: 30,
         },
         video: Some(0),
         audio: Some(1),
         cover: false,
         gif_period_us: None,
         raw_video,
+        expanded: false,
     }
 }

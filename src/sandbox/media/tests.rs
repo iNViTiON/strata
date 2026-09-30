@@ -85,6 +85,8 @@ fn four_slots_backpressure_cancellation_and_repeated_teardown_are_bounded() {
         audio: true,
         duration_us: 60_000_000,
         start_tick: 0,
+        fps: 30,
+        native_fps: 30,
     };
     for _ in 0..30 {
         let workers: Vec<_> = (0..MAX_WORKERS)
@@ -140,6 +142,8 @@ fn decoder_failure_and_trailing_output_are_not_successful_end_of_stream() {
         audio: false,
         duration_us: 33_333,
         start_tick: 0,
+        fps: 30,
+        native_fps: 30,
     };
     let mut bytes = Vec::new();
     h.write(&mut bytes).expect("header");
@@ -148,7 +152,7 @@ fn decoder_failure_and_trailing_output_are_not_successful_end_of_stream() {
         pixels: vec![0; 4],
         samples: vec![],
     }
-    .write(&mut bytes)
+    .write(&mut bytes, 30)
     .expect("frame");
     crate::media::write_end(&mut bytes, 1, h.duration_us).expect("end");
     let file = tempfile::NamedTempFile::new().expect("wire fixture");
