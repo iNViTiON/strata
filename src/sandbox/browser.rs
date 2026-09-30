@@ -17,7 +17,7 @@ use std::{
 };
 
 use super::{Cancellation, ParseOperation, metadata::MediaMetadata};
-use crate::services::ModelFormat;
+use crate::services::{ModelFormat, PreviewPriority};
 use wire::{Operation, Response};
 
 mod process;
@@ -166,7 +166,13 @@ pub(crate) fn thumbnail(
         ParseOperation::ThumbnailModel(ModelFormat::FreeCad) => Operation::FreeCadThumbnail,
         _ => return Err("Not a browser thumbnail operation".into()),
     };
-    let result = request(pool(), path, operation, cancellation)?;
+    let result = request(
+        pool(),
+        path,
+        operation,
+        cancellation,
+        PreviewPriority::Current,
+    )?;
     Ok(Thumbnail {
         png: result.png.ok_or("Thumbnail unavailable")?,
         metadata: result.metadata,
@@ -187,15 +193,24 @@ pub(crate) fn metadata(
             Operation::MediaMetadata
         },
         cancellation,
+        PreviewPriority::Current,
     )?
     .metadata
     .ok_or_else(|| "Media details unavailable".into())
+}
+
+/// Whether thumbnail work is waiting or running, which speculative renders yield to.
+pub(crate) fn thumbnails_pending() -> bool {
+    let state = pool().state.lock().unwrap_or_else(|p| p.into_inner());
+    state.thumbnail_waiters + state.metadata_waiters > 0
+        || state.count.saturating_sub(state.idle.len()) > 0
 }
 
 pub(crate) fn preview(
     path: &Path,
     operation: &ParseOperation,
     cancellation: &Cancellation,
+    priority: PreviewPriority,
 ) -> Option<Result<Vec<u8>, String>> {
     let operation = match operation {
         ParseOperation::PreviewImage | ParseOperation::DocumentImage => Operation::PreviewImage,
@@ -208,7 +223,7 @@ pub(crate) fn preview(
         return None;
     }
     Some(
-        request(preview_pool(), path, operation, cancellation)
+        request(preview_pool(), path, operation, cancellation, priority)
             .and_then(|parts| parts.png.ok_or_else(|| "Preview unavailable".to_owned())),
     )
 }
@@ -249,10 +264,12 @@ fn request(
     path: &Path,
     operation: Operation,
     cancellation: &Cancellation,
+    priority: PreviewPriority,
 ) -> Result<ResultParts, String> {
     if cancellation.is_cancelled() {
         return Err("Browser request cancelled".into());
     }
+    let neighbor = priority == PreviewPriority::Neighbor;
     let file = open_source(path).map_err(|e| e.to_string())?;
     let key = FileKey::read(path, &file).map_err(|e| e.to_string())?;
     let metadata_only = matches!(
@@ -270,6 +287,15 @@ fn request(
     if !metadata_only && operation != Operation::Video && key.size > input_limit {
         return Err("Browser input exceeds the supported size limit".into());
     }
+    // A neighbor waits for admission before it takes the in-flight gate, so
+    // an interactive request for the same file is never queued behind it.
+    let mut admitted = if neighbor {
+        let queued = Instant::now();
+        let lease = pool.acquire_class(operation, cancellation, true)?;
+        Some((lease, queued.elapsed().as_millis() as u64))
+    } else {
+        None
+    };
     let entry = cache_entry(&pool.cache, key.clone(), operation);
     let mut cached = loop {
         if cancellation.is_cancelled() {
@@ -278,6 +304,9 @@ fn request(
         match entry.try_lock() {
             Ok(guard) => break guard,
             Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) if neighbor => {
+                return Err("Preview already in progress".into());
+            }
             Err(std::sync::TryLockError::WouldBlock) => std::thread::sleep(WAIT_QUANTUM),
         }
     };
@@ -293,14 +322,26 @@ fn request(
         cached.png.is_some() || cached.failed_thumbnail
     };
     if !hit {
-        let queued = Instant::now();
-        let mut lease = pool.acquire(operation, cancellation)?;
-        let queue_ms = queued.elapsed().as_millis() as u64;
+        let (mut lease, queue_ms) = match admitted.take() {
+            Some(admitted) => admitted,
+            None => {
+                let queued = Instant::now();
+                let lease = pool.acquire(operation, cancellation)?;
+                (lease, queued.elapsed().as_millis() as u64)
+            }
+        };
         if cancellation.is_cancelled() {
             return Err("Browser request cancelled".into());
         }
         let started = Instant::now();
-        let response = lease.execute(&file, operation, cancellation)?;
+        // Admitted neighbor work runs to completion: cancelling it would kill the
+        // supervisor and make the next interactive render pay a cold start.
+        let detached = Cancellation::default();
+        let response = lease.execute(
+            &file,
+            operation,
+            if neighbor { &detached } else { cancellation },
+        )?;
         if FileKey::read(path, &file).map_err(|e| e.to_string())? != key {
             return Err("Browser input changed while rendering".into());
         }
@@ -338,7 +379,8 @@ fn request(
             "browser worker completed"
         );
     }
-    if cancellation.is_cancelled() {
+    // A cancelled neighbor still hands over what it rendered: it only fills the cache.
+    if cancellation.is_cancelled() && !neighbor {
         return Err("Browser request cancelled".into());
     }
     Ok(ResultParts {
@@ -382,6 +424,8 @@ struct PoolState {
     count: usize,
     slow_running: usize,
     thumbnail_waiters: usize,
+    neighbor_waiters: usize,
+    neighbor_running: usize,
     metadata_waiters: usize,
     metadata_running: usize,
     thumbnail_streak: usize,
@@ -497,6 +541,17 @@ impl Pool {
         operation: Operation,
         cancellation: &Cancellation,
     ) -> Result<Lease<'_>, String> {
+        self.acquire_class(operation, cancellation, false)
+    }
+
+    /// A neighbor is admitted only when nothing else is waiting and a worker
+    /// stays free afterwards, so it can never delay an interactive request.
+    fn acquire_class(
+        &self,
+        operation: Operation,
+        cancellation: &Cancellation,
+        neighbor: bool,
+    ) -> Result<Lease<'_>, String> {
         let metadata = matches!(
             operation,
             Operation::ImageMetadata | Operation::MediaMetadata
@@ -512,14 +567,18 @@ impl Pool {
                 | Operation::MediaMetadata
         );
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        if metadata {
+        if neighbor {
+            state.neighbor_waiters += 1;
+        } else if metadata {
             state.metadata_waiters += 1;
         } else {
             state.thumbnail_waiters += 1;
         }
         loop {
             if cancellation.is_cancelled() {
-                if metadata {
+                if neighbor {
+                    state.neighbor_waiters -= 1;
+                } else if metadata {
                     state.metadata_waiters -= 1;
                 } else {
                     state.thumbnail_waiters -= 1;
@@ -528,6 +587,7 @@ impl Pool {
                 return Err("Browser request cancelled".into());
             }
             let limit = self.limit.load(Ordering::Relaxed);
+            let busy = state.count.saturating_sub(state.idle.len());
             let slow_available = state.slow_running < limit.saturating_sub(1).max(1);
             // At most one probe competes with thumbnails; continuous scrolling still
             // yields a turn after four thumbnail admissions, without reserving an idle worker.
@@ -535,16 +595,21 @@ impl Pool {
                 && state.metadata_running == 0
                 && slow_available
                 && (state.thumbnail_waiters == 0 || state.thumbnail_streak >= 4);
-            let admitted = if metadata {
+            let admitted = if neighbor {
+                state.thumbnail_waiters == 0
+                    && state.metadata_waiters == 0
+                    && state.neighbor_running == 0
+                    && busy + 1 < limit
+            } else if metadata {
                 metadata_turn
             } else {
                 !metadata_turn && (!slow || slow_available)
             };
-            if admitted
-                && state.count.saturating_sub(state.idle.len()) < limit
-                && (!state.idle.is_empty() || state.count < limit)
-            {
-                if metadata {
+            if admitted && busy < limit && (!state.idle.is_empty() || state.count < limit) {
+                if neighbor {
+                    state.neighbor_waiters -= 1;
+                    state.neighbor_running += 1;
+                } else if metadata {
                     state.metadata_waiters -= 1;
                     state.metadata_running += 1;
                     state.thumbnail_streak = 0;
@@ -565,6 +630,7 @@ impl Pool {
                     worker,
                     slow,
                     metadata,
+                    neighbor,
                 };
                 if lease.worker.is_none() {
                     lease.worker = Some(Worker::spawn().map_err(|e| e.to_string())?);
@@ -585,6 +651,7 @@ struct Lease<'a> {
     worker: Option<Worker>,
     slow: bool,
     metadata: bool,
+    neighbor: bool,
 }
 
 impl Lease<'_> {
@@ -643,6 +710,9 @@ impl Drop for Lease<'_> {
         }
         if self.metadata {
             state.metadata_running = state.metadata_running.saturating_sub(1);
+        }
+        if self.neighbor {
+            state.neighbor_running = state.neighbor_running.saturating_sub(1);
         }
         self.pool.changed.notify_all();
         drop(state);
