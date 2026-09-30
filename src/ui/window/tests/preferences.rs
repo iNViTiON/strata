@@ -4,7 +4,7 @@ use gtk::prelude::*;
 
 use super::*;
 use crate::ui::browser_modes::BrowserMode;
-use crate::ui::preferences::PreferenceManager;
+use crate::ui::preferences::{PreferenceManager, TypingMode};
 use crate::ui::tenxer_mode::UNUSED_SUBTITLE;
 
 #[test]
@@ -358,6 +358,94 @@ fn browsing_preferences_stay_saved_but_unused_until_exit() {
                     .any(|button| button.is_active()),
                 "type to search filters again after leaving 10xer"
             );
+            drop(directory);
+        },
+    );
+}
+
+#[test]
+fn default_typing_mode_applies_before_settings_and_follows_the_control_in_both_windows() {
+    gtk_test(
+        "ui::window::tests::preferences::default_typing_mode_applies_before_settings_and_follows_the_control_in_both_windows",
+        || {
+            write_settings("type_to_search = false\ntyping_mode = \"jump_to_name\"\n");
+            let manager = PreferenceManager::shared();
+            assert_eq!(manager.typing_mode(), TypingMode::JumpToName);
+            let first = OpenWindow::open();
+            let second = OpenWindow::open();
+            assert!(settings_closed(&first) && settings_closed(&second));
+            let directory = load_folder(&first);
+            second
+                .content
+                .browser
+                .navigate_location(crate::model::Location::local(directory.path()));
+            wait_until(|| !column_loading(&second, 0));
+            let none = gtk::gdk::ModifierType::empty();
+            let jumps = |open: &OpenWindow| {
+                open.content
+                    .browser
+                    .set_jump_to_name_idle_timeout(std::time::Duration::from_secs(60));
+                open.content.browser.browser().select(0, 0);
+                open.content.browser.browser().focus_active();
+                wait_until(|| open.content.browser.item_view_has_focus());
+                press(&open.window, gtk::gdk::Key::a, none);
+                let jumped = open.content.browser.jump_to_name_active();
+                press(&open.window, gtk::gdk::Key::Escape, none);
+                jumped
+            };
+            assert!(
+                jumps(&first),
+                "a saved Jump to name types before Settings opens"
+            );
+
+            first.content.settings_button().emit_clicked();
+            second.content.settings_button().emit_clicked();
+            settle();
+            let first_choice = choice_named(first.content.overlay(), "Default typing mode");
+            let second_choice = choice_named(second.content.overlay(), "Default typing mode");
+            assert_eq!(first_choice.label().as_deref(), Some("Jump to name"));
+            assert!(first_choice.is_sensitive() && second_choice.is_sensitive());
+            assert_ne!(
+                description_named(first.content.overlay(), "Default typing mode"),
+                UNUSED_SUBTITLE
+            );
+
+            choose_option(&second_choice, "Vim keys");
+            settle();
+            assert_eq!(manager.typing_mode(), TypingMode::VimKeys);
+            assert_eq!(first_choice.label().as_deref(), Some("Vim keys"));
+            assert!(
+                std::fs::read_to_string(settings_file())
+                    .expect("saved settings")
+                    .contains("typing_mode = \"vim_keys\"")
+            );
+            close_settings(&first);
+            close_settings(&second);
+            for open in [&first, &second] {
+                assert!(!jumps(open), "letters no longer jump in Vim keys mode");
+            }
+
+            first.content.settings_button().emit_clicked();
+            settle();
+            choose_option(&first_choice, "Jump to name");
+            settle();
+            assert_eq!(manager.typing_mode(), TypingMode::JumpToName);
+            close_settings(&first);
+            assert!(jumps(&second), "the other window follows the change");
+
+            second.content.settings_button().emit_clicked();
+            settle();
+            manager.set_type_to_search(true);
+            settle();
+            assert!(!second_choice.is_sensitive() && !first_choice.is_sensitive());
+            manager.set_type_to_search(false);
+            manager.set_tenxer_mode(true);
+            settle();
+            assert_eq!(
+                description_named(second.content.overlay(), "Default typing mode"),
+                UNUSED_SUBTITLE
+            );
+            close_settings(&second);
             drop(directory);
         },
     );
@@ -788,4 +876,40 @@ fn walk(widget: &gtk::Widget, visit: &mut impl FnMut(&gtk::Widget)) {
         walk(&widget, visit);
         child = widget.next_sibling();
     }
+}
+
+fn choice_named(root: &impl gtk::prelude::IsA<gtk::Widget>, title: &str) -> gtk::MenuButton {
+    let mut found = None;
+    walk(root.upcast_ref(), &mut |widget| {
+        if found.is_none()
+            && let Some(button) = widget.downcast_ref::<gtk::MenuButton>()
+            && button.tooltip_text().as_deref() == Some(title)
+        {
+            found = Some(button.clone());
+        }
+    });
+    found.unwrap_or_else(|| panic!("choice {title}"))
+}
+
+fn choose_option(choice: &gtk::MenuButton, label: &str) {
+    let popover = choice.popover().expect("choice popover");
+    let mut option = None;
+    walk(popover.upcast_ref(), &mut |widget| {
+        if option.is_none()
+            && let Some(button) = widget.downcast_ref::<gtk::Button>()
+        {
+            let mut labelled = false;
+            walk(button.upcast_ref(), &mut |child| {
+                labelled |= child
+                    .downcast_ref::<gtk::Label>()
+                    .is_some_and(|candidate| candidate.text() == label);
+            });
+            if labelled {
+                option = Some(button.clone());
+            }
+        }
+    });
+    option
+        .unwrap_or_else(|| panic!("option {label}"))
+        .emit_clicked();
 }

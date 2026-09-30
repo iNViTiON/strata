@@ -78,6 +78,12 @@ const TARGETS: &[Target] = &[
         aliases: "filter keyboard typing pane",
     },
     Target {
+        id: "typing-mode",
+        page: "general",
+        title: "Default typing mode",
+        aliases: "jump name type-ahead vim keys hjkl letters prefix",
+    },
+    Target {
         id: "subfolders",
         page: "general",
         title: "Include subfolders",
