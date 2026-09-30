@@ -144,6 +144,8 @@ pub(in crate::ui) struct Preferences {
     #[serde(default)]
     preview_autoplay: bool,
     #[serde(default)]
+    preload_neighbor_previews: bool,
+    #[serde(default)]
     auto_refresh_interval: u32,
     #[serde(default = "crate::sandbox::browser::default_worker_limit")]
     thumbnail_workers: usize,
@@ -246,6 +248,7 @@ impl Default for Preferences {
             preview_volume: default_full_volume(),
             preview_text_wrap: false,
             preview_autoplay: false,
+            preload_neighbor_previews: false,
             auto_refresh_interval: 0,
             thumbnail_workers: crate::sandbox::browser::default_worker_limit(),
             icons_thumbnail_size: default_icons_thumbnail_size(),
@@ -787,6 +790,15 @@ impl PreferenceManager {
 
     pub fn set_preview_autoplay(&self, autoplay: bool) {
         self.preferences.borrow_mut().preview_autoplay = autoplay;
+        self.save_preferences();
+    }
+
+    pub fn preload_neighbor_previews(&self) -> bool {
+        self.preferences.borrow().preload_neighbor_previews
+    }
+
+    pub fn set_preload_neighbor_previews(&self, enabled: bool) {
+        self.preferences.borrow_mut().preload_neighbor_previews = enabled;
         self.save_preferences();
     }
 
