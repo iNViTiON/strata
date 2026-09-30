@@ -293,8 +293,22 @@ impl ModelPreviewStage {
     }
 }
 
+/// Speculative loads yield to interactive ones at every shared limit.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PreviewPriority {
+    #[default]
+    Current,
+    Neighbor,
+}
+
 pub trait PreviewProvider {
     fn load(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle;
+
+    /// Starts work for an entry next to the selection. Dropping the handle
+    /// need not cancel work that has already begun.
+    fn preload(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle {
+        self.load(request, emit)
+    }
 }
 
 fn content_type_for_path(path: &Path) -> glib::GString {
@@ -315,6 +329,27 @@ pub(crate) fn supports_remote_video(name: &OsStr) -> bool {
         .extension()
         .and_then(OsStr::to_str)
         .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "mov" | "mp4"))
+}
+
+/// Content worth rendering ahead of a selection. Text, documents and archives
+/// are cheap enough to load on demand; models and covers hold the heavy permit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PreloadKind {
+    Image,
+    Pdf,
+    Media,
+}
+
+pub(crate) fn preload_kind(name: &OsStr) -> Option<PreloadKind> {
+    if is_model(name) || crate::sandbox::CoverFormat::for_name(name).is_some() {
+        return None;
+    }
+    match content_family(&content_type_for_path(Path::new(name))) {
+        PreviewContent::Pdf { .. } => Some(PreloadKind::Pdf),
+        PreviewContent::Image => Some(PreloadKind::Image),
+        PreviewContent::Media => Some(PreloadKind::Media),
+        _ => None,
+    }
 }
 
 pub(crate) fn is_model(name: &OsStr) -> bool {
