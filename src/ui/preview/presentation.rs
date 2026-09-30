@@ -17,13 +17,6 @@ impl PreviewState {
 
     /// Runs `listener` every time a change in how the preview is presented has
     /// settled, in the order listeners were added.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "subscribed to by features that present the preview differently"
-        )
-    )]
     pub(super) fn on_presentation_changed(&self, listener: impl Fn() + 'static) {
         self.presentation.0.borrow_mut().push(Rc::new(listener));
     }

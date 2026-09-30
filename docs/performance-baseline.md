@@ -83,3 +83,62 @@ Use these provisional guardrails:
 - Long-term peak memory remains targeted below 150 MiB for the 100,000-entry fixture.
 
 Record hardware, build profile, GTK version, cache state, and notable environmental load whenever replacing the baseline table. Use multiple samples before treating small timing differences as regressions.
+
+## Preview start latency — 2026-09-29
+
+How long moving the selection to another file takes to show its preview, with and
+without **Preload neighbor previews** (see
+[Neighbor preloading](preview-sandbox.md#neighbor-preloading)).
+
+Method: the pinned e2e container image (rootless Podman), private Xvfb 1440×900
+with the Cairo renderer, `--release` (no LTO), software decoding, Intel Core Ultra 7
+258V. One fresh application per file type, 13 distinct copies of one synthetic
+fixture (FFmpeg `testsrc2`, cairo PDFs; these compress better than camera files),
+stepped with the Down key. Times run from the key press to the next painted frame
+(images, PDFs) or the first decoded frame (video, audio), from temporary timing
+marks that are not part of the build. The first sample is a cold start and is left
+out; medians and p90 cover the other twelve. The page cache was warm and the
+machine was shared, so run-to-run differences of up to about 2× occur: compare
+only rows measured together. The first-frame time that stays in the build is the
+`latency_ms` field of the `sandboxed media first frame` debug log
+(`RUST_LOG=strata::ui::media=debug`).
+
+| File | Preference off (median / p90 ms) | On, after a 1.5 s pause | On, 0.35 s between key presses |
+| --- | --- | --- | --- |
+| JPEG 2 MP | 186 / 266 | 8 / 13 | |
+| JPEG 24 MP | 575 / 966 | 8 / 12 | 530 / 598 |
+| PNG 4K | 389 / 565 | 8 / 12 | |
+| WebP 2 MP | 231 / 240 | 11 / 19 | |
+| PDF, 1 page | 147 / 177 | 8 / 15 | |
+| PDF, 50 pages | 154 / 162 | 10 / 13 | 10 / 14 |
+| H.264 1080p | 284 / 318 | 9 / 13 | 87 / 101 |
+| HEVC 4K | 419 / 538 | 11 / 13 | |
+| VP9 720p | 399 / 521 | 7 / 12 | |
+| MOV 720p | 410 / 478 | 11 / 14 | |
+| MP3 | 259 / 328 | 10 / 14 | |
+| FLAC | 240 / 253 | 11 / 15 | |
+| GIF | 330 / 386 | 8 / 13 | |
+
+Where the time goes without preloading (H.264 1080p, decode size 449×252, medians
+of a separate run): 80 ms focus debounce, 8 ms request and render, 11 ms wait for
+the next 8 ms player tick, 84 ms bubblewrap and helper start (the helper is the
+whole Strata executable), 123 ms `ffprobe` inside the sandbox, 191 ms FFmpeg start
+and first frame, 10 ms audio output setup on the GTK thread; 512 ms in total. Image
+renders spend 200 to 580 ms in a pool job; a first PDF page spends 120 to 160 ms in a
+one-shot sandbox. The first video in a process also pays for creating the GStreamer
+audio output: 190 to 1300 ms here, where the container has no audio server.
+
+Memory of one parked worker (a paused preview, measured six seconds after its first
+frame):
+
+| | Software, whole process tree (PSS / RSS) | VA-API (host FFmpeg only) |
+| --- | --- | --- |
+| H.264 1080p | +105 / +163 MiB | video FFmpeg 56 / 79 MiB, audio FFmpeg 13 / 36 MiB, GPU-mapped 35 MiB |
+| HEVC 4K | +236 / +284 MiB | video FFmpeg 170 / 193 MiB, audio FFmpeg 12 / 35 MiB, GPU-mapped 114 MiB |
+| VP9 720p | +60 / +91 MiB | |
+| MP3 | +43 / +75 MiB | |
+
+A parked worker uses no CPU beyond a 50 ms wake-up of its reader thread. Reaching
+that state costs 120 to 590 ms of CPU per video. VA-API and the desktop's audio
+server could not be measured inside the container image, so the VA-API column
+comes from FFmpeg alone.
