@@ -258,6 +258,26 @@ Upstream's publishing workflows cannot fire from `release` or its tags:
 `publish-aur.yml`, `e2e-images.yml` and `ci.yml` trigger only on pushes to
 `main` or pull requests. None has a tag, `create` or `release` trigger.
 
+### Binaries for other distributions
+
+Every published release also gets a version tag in upstream's nightly form,
+`v<next patch>-nightly.YYYYMMDD[.N]` (computed by `scripts/release_version.py`),
+because the in-app updater and `install.sh` only understand that grammar. The
+workflow's `binaries` jobs build it natively on Ubuntu for x86_64 and aarch64,
+exactly like upstream's `release.yml` (same archive names and layout, with
+`STRATA_RELEASE_TAG`, `STRATA_BUILD_KIND=nightly` and the commit baked in),
+attest the archives, and publish a GitHub Release marked latest. They pick the
+newest version tag that has no release yet, so a failed build is retried by
+the next run even when nothing else changed.
+
+`fork/distribution` (from `main`, last in `.release/branches`, never
+upstreamed) points the updater, its Settings links and `install.sh` at this
+fork, has `install.sh` accept the nightly tags, and makes Nightly the default
+update channel, since the fork publishes nothing else. Users coming from an
+upstream install keep their saved channel and must choose Nightly once in
+Settings. The Nix package ignores all of this: its install-source marker
+disables the updater.
+
 ### Rolling back
 
 Point the NixOS input at a tag instead of the branch:
