@@ -407,6 +407,8 @@ impl PreviewState {
             media.pause();
         }
         self.hide_panel();
+        // A hidden preview must not keep decoders parked for files nobody sees.
+        self.preload.clear();
     }
 
     pub(super) fn sync_split(self: &Rc<Self>, split: &gtk::Paned) {
@@ -575,6 +577,7 @@ impl PreviewState {
         }
         if restored {
             self.resume_keyboard_claim();
+            self.preload.schedule();
         }
     }
 
