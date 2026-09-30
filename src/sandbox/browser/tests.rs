@@ -271,8 +271,15 @@ fn a_request_an_operation_stops_reports_the_operation_not_a_cancel() {
         let in_flight = gate.lock().expect("an in-flight duplicate");
         let cancellation = Cancellation::default();
         let outcome = std::thread::scope(|scope| {
-            let waiting =
-                scope.spawn(|| request(&pool, &path, Operation::MediaMetadata, &cancellation));
+            let waiting = scope.spawn(|| {
+                request(
+                    &pool,
+                    &path,
+                    Operation::MediaMetadata,
+                    &cancellation,
+                    PreviewPriority::Current,
+                )
+            });
             while Arc::strong_count(&gate) < 3 && !waiting.is_finished() {
                 std::thread::sleep(Duration::from_millis(1));
             }
@@ -724,7 +731,15 @@ fn preview_operations_render_inside_the_decoder() {
     )
     .expect("fixture");
     let cancellation = Cancellation::default();
-    assert!(preview(&path, &ParseOperation::ThumbnailImage, &cancellation).is_none());
+    assert!(
+        preview(
+            &path,
+            &ParseOperation::ThumbnailImage,
+            &cancellation,
+            PreviewPriority::Current
+        )
+        .is_none()
+    );
     let response = crate::sandbox_helper::browser_render(&path, Operation::PreviewImage);
     assert!(super::super::valid_output(
         ParseOperation::PreviewImage,
@@ -744,4 +759,113 @@ fn preview_operations_render_inside_the_decoder() {
         ParseOperation::DocumentMermaid,
         &response.png
     ));
+}
+
+fn idle_pool(limit: usize) -> Pool {
+    Pool {
+        state: Mutex::new(PoolState {
+            count: limit,
+            idle: (0..limit)
+                .map(|_| IdleWorker {
+                    worker: Worker::OneShot,
+                    since: Instant::now(),
+                })
+                .collect(),
+            ..Default::default()
+        }),
+        changed: Condvar::new(),
+        limit: AtomicUsize::new(limit),
+        idle_timeout: DEFAULT_WORKER_IDLE_TIMEOUT,
+        cache: Mutex::default(),
+    }
+}
+
+fn wait_until(pool: &Pool, condition: impl Fn(&PoolState) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !condition(&pool.state.lock().expect("pool")) {
+        assert!(Instant::now() < deadline, "pool state deadline");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn a_neighbor_leaves_a_worker_free_and_is_one_at_a_time() {
+    let pool = idle_pool(2);
+    let cancellation = Cancellation::default();
+    let neighbor = pool
+        .acquire_class(Operation::PreviewImage, &cancellation, true)
+        .expect("neighbor admitted while a worker stays free");
+    let cancelled = Cancellation::default();
+    cancelled.cancel();
+    assert!(
+        pool.acquire_class(Operation::PreviewImage, &cancelled, true)
+            .is_err(),
+        "only one neighbor runs at a time"
+    );
+    let current = pool
+        .acquire(Operation::PreviewImage, &cancellation)
+        .expect("an interactive request never waits behind the neighbor");
+    drop((neighbor, current));
+    let state = pool.state.lock().expect("pool");
+    assert_eq!((state.neighbor_running, state.neighbor_waiters), (0, 0));
+}
+
+#[test]
+fn a_single_worker_never_runs_neighbor_work() {
+    let pool = idle_pool(1);
+    let cancellation = Cancellation::default();
+    std::thread::scope(|scope| {
+        let (pool, cancellation) = (&pool, &cancellation);
+        let waiter = scope.spawn(move || {
+            pool.acquire_class(Operation::PreviewImage, cancellation, true)
+                .is_err()
+        });
+        wait_until(pool, |state| state.neighbor_waiters == 1);
+        std::thread::sleep(Duration::from_millis(100));
+        {
+            let state = pool.state.lock().expect("pool");
+            assert_eq!((state.neighbor_waiters, state.neighbor_running), (1, 0));
+        }
+        cancellation.cancel();
+        assert!(waiter.join().expect("waiter"), "cancelled while waiting");
+    });
+    assert_eq!(pool.state.lock().expect("pool").neighbor_waiters, 0);
+}
+
+#[test]
+fn a_neighbor_yields_to_an_interactive_waiter() {
+    let pool = idle_pool(3);
+    let cancellation = Cancellation::default();
+    let held: Vec<_> = (0..3)
+        .map(|_| {
+            pool.acquire(Operation::PreviewImage, &cancellation)
+                .expect("held lease")
+        })
+        .collect();
+    std::thread::scope(|scope| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for (label, neighbor) in [("neighbor", true), ("current", false)] {
+            let (tx, pool, cancellation) = (tx.clone(), &pool, &cancellation);
+            scope.spawn(move || {
+                if let Ok(lease) =
+                    pool.acquire_class(Operation::PreviewImage, cancellation, neighbor)
+                {
+                    tx.send(label).expect("receiver");
+                    std::thread::sleep(Duration::from_millis(50));
+                    drop(lease);
+                }
+            });
+            wait_until(pool, |state| {
+                if neighbor {
+                    state.neighbor_waiters == 1
+                } else {
+                    state.thumbnail_waiters == 1
+                }
+            });
+        }
+        drop(held);
+        let first = rx.recv_timeout(Duration::from_secs(5)).expect("admission");
+        let second = rx.recv_timeout(Duration::from_secs(5)).expect("admission");
+        assert_eq!((first, second), ("current", "neighbor"));
+    });
 }
