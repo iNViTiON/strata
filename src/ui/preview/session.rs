@@ -71,13 +71,15 @@ impl PreviewState {
         self.cancel_loading();
         self.pdf_loads.borrow_mut().clear();
         self.clear_content();
-        let reserves_empty_preview = self.reserves_empty_preview();
+        let expanded = self.expanded.is_active();
+        let reserves_empty_preview = self.reserves_empty_preview() || expanded;
         if reserves_empty_preview
-            && self
-                .split
-                .borrow()
-                .as_ref()
-                .is_none_or(|split| self.can_show_in(split))
+            && (expanded
+                || self
+                    .split
+                    .borrow()
+                    .as_ref()
+                    .is_none_or(|split| self.can_show_in(split)))
         {
             self.show_placeholder();
         } else {
