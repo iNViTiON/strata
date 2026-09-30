@@ -2,7 +2,8 @@
 # See "Releases" in NIX.md before adding one.
 base/preview-seams
 feat/jump-to-name
-feat/preload-neighbor-previews
 feat/expanded-preview
+# Built on feat/expanded-preview (video neighbors hand over to its size and rate).
+feat/preload-neighbor-previews
 # Fork-only distribution glue (updater and install.sh point at this fork); keep last.
 fork/distribution

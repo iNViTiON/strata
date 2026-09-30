@@ -213,6 +213,8 @@ another comes after it), commit, and push `nix-dev`. Feature branches must be
 pushed to `origin` before they are listed: CI merges `origin/*` and fails
 rather than building a release without a listed branch. Branches built on
 `base/preview-seams` are rebased with it; keep that base first in the list.
+`feat/preload-neighbor-previews` is built on `feat/expanded-preview`, so it comes after
+it and is rebased onto it whenever that branch is rewritten.
 
 ### Rebuilding locally
 
