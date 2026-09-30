@@ -10,7 +10,7 @@ fork's `nix-dev` branch (and `release`, built from it). `main` mirrors
 
 | Branch | Purpose |
 | --- | --- |
-| `main` | Untouched mirror of upstream `main`, fast-forwarded by the sync workflow |
+| `main` | Untouched mirror of upstream, fast-forwarded by the sync workflow to the latest stable release tag (or, on demand, upstream `main`'s tip) |
 | `nix-dev` | `main` plus this environment; stays checked out in the main checkout |
 | `release` | Generated: `nix-dev` plus the branches in `.release/branches`; never commit to it by hand |
 | feature branches | Created from `main` in worktrees under `.claude/worktrees/`, using this checkout's environment |
@@ -132,9 +132,19 @@ Remove a worktree with `git worktree remove .claude/worktrees/my-feature`.
 ## Keeping `nix-dev` in sync
 
 `.github/workflows/sync-upstream.yml` runs every six hours and on demand. It
-fast-forwards `main` to upstream, rebases `nix-dev` onto it and pushes both
-atomically with `--force-with-lease`. On a conflict it pushes nothing and opens
-(or updates) an issue labeled `sync-conflict` with resolution steps.
+fast-forwards `main` to upstream's latest stable release tag (`vX.Y.Z`; release
+candidates and nightlies are ignored), rebases `nix-dev` onto it and pushes both
+atomically with `--force-with-lease`. `main` never moves backwards: when it is
+already at or past that tag (for example after a tip sync), the run does
+nothing. On a conflict it pushes nothing and opens (or updates) an issue
+labeled `sync-conflict` with resolution steps.
+
+To follow upstream `main`'s tip instead, run the workflow manually with
+`main_tip` enabled:
+
+```bash
+gh workflow run sync-upstream.yml -R iNViTiON/strata -f main_tip=true
+```
 
 Because the workflow rewrites `nix-dev`, update the local checkout after a sync:
 
