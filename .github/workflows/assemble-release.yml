@@ -146,3 +146,191 @@ jobs:
           for number in $(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[].number'); do
             gh issue close "$number" --comment "Release assembled: $RUN_URL"
           done
+
+  # Binaries for other distributions. Keyed on the newest version tag without a
+  # GitHub Release rather than on this run's publish, so a failed build is
+  # retried by the next run even when the manifest is unchanged.
+  pending:
+    needs: assemble
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.find.outputs.tag }}
+      commit: ${{ steps.find.outputs.commit }}
+    steps:
+      - name: Find the newest version tag without a release
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="$(git ls-remote --tags --refs "https://github.com/$REPOSITORY.git" 'v*' \
+            | sed 's#.*refs/tags/##' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}(\.[0-9]+)?$' \
+            | sort -V | tail -n 1 || true)"
+          if [[ -z "$tag" ]] || gh release view "$tag" --repo "$REPOSITORY" > /dev/null 2>&1; then
+            echo "Nothing to build."
+            exit 0
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "commit=$(gh api "repos/$REPOSITORY/commits/$tag" --jq .sha)" >> "$GITHUB_OUTPUT"
+
+  # Mirrors upstream's release.yml build so the archives match what the
+  # updater and install.sh expect.
+  binaries:
+    needs: pending
+    if: needs.pending.outputs.tag != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      TAG: ${{ needs.pending.outputs.tag }}
+      SOURCE_SHA: ${{ needs.pending.outputs.commit }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Check out the release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.pending.outputs.tag }}
+          persist-credentials: false
+
+      - name: Verify the source commit and set the build identity
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          {
+            echo "VERSION=${TAG#v}"
+            echo "STRATA_RELEASE_TAG=$TAG"
+            echo "STRATA_BUILD_KIND=nightly"
+            echo "STRATA_BUILD_COMMIT=$SOURCE_SHA"
+            echo "RUST_VERSION=$(sed -nE 's/^rust = \{ version = "([^"]+)".*/\1/p' mise.toml)"
+          } >> "$GITHUB_ENV"
+
+      - name: Install native development libraries
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
+          sudo apt-get update
+          sudo apt-get install --yes libfontconfig1-dev libgtk-4-dev libgtksourceview-5-dev libpoppler-glib-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: fork-release-${{ matrix.target }}
+
+      - name: Build release binary
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Package binary
+        run: |
+          set -euo pipefail
+          package="strata-${VERSION}-${TARGET}"
+          mkdir -p "dist/$package"
+          install -m 755 "target/$TARGET/release/strata" "dist/$package/strata"
+          objcopy --only-keep-debug --compress-debug-sections=zlib "dist/$package/strata" "dist/$package.debug"
+          strip --strip-unneeded "dist/$package/strata"
+          objcopy --add-gnu-debuglink="dist/$package.debug" "dist/$package/strata"
+          printf '%s\n' "$SOURCE_SHA" > "dist/$package/SOURCE_COMMIT"
+          cp README.md LICENSE THIRD_PARTY_LICENSES.md data/licenses/UnRAR.txt "dist/$package/"
+          mkdir -p "dist/$package/docs" "dist/$package/portal"
+          cp docs/portal-file-chooser.md "dist/$package/docs/"
+          cp data/portal/* "dist/$package/portal/"
+          mkdir -p "dist/$package/udiskie"
+          cp data/udiskie/* "dist/$package/udiskie/"
+          install -m 644 data/io.github.lgse.Strata.desktop "dist/$package/"
+          install -m 644 data/io.github.lgse.Strata.FileManager1.service "dist/$package/"
+          install -m 644 data/icons/scalable/apps/io.github.lgse.Strata.svg "dist/$package/"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+          (cd dist && sha256sum "$package.tar.gz" > "$package.tar.gz.sha256")
+          (cd dist && sha256sum "$package.debug" > "$package.debug.sha256")
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: strata-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.debug
+            dist/*.sha256
+          if-no-files-found: error
+
+  github-release:
+    needs: [pending, binaries]
+    runs-on: ubuntu-24.04
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      TAG: ${{ needs.pending.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Attest the archives
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      # Marked latest, not prerelease: install.sh resolves releases/latest, and
+      # the nightly version suffix already keeps these off the Stable channel.
+      - name: Publish the GitHub release
+        env:
+          REPOSITORY: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          manifest="$(gh api "repos/$REPOSITORY/git/refs/tags/$TAG" --jq .object.sha \
+            | xargs -I{} gh api "repos/$REPOSITORY/git/tags/{}" --jq .message)"
+          notes="Fork build of [lgse/strata]($SERVER/lgse/strata): \`nix-dev\` plus the fork's feature branches.
+
+          \`\`\`
+          $manifest
+          \`\`\`
+
+          Nix users: see [NIX.md]($SERVER/$REPOSITORY/blob/nix-dev/NIX.md). Other distributions: download the archive for your architecture, or run \`install.sh\` from the \`release\` branch, which installs the latest fork release."
+          gh release create "$TAG" dist/* --repo "$REPOSITORY" --verify-tag --latest \
+            --title "Strata $TAG (fork)" --notes "$notes"
+
+  binaries-failed:
+    needs: [pending, binaries, github-release]
+    if: failure()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report the failed binaries in an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.pending.outputs.tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh label create "$ISSUE_LABEL" --color B60205 --description "Fork release assembly needs manual help" --force
+          body="Building or publishing the binaries for \`$TAG\` failed. The Nix release is unaffected; the next run retries.
+
+          Run: $RUN_URL"
+          existing="$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "Fork release binaries failed" --label "$ISSUE_LABEL" --body "$body"
+          fi
