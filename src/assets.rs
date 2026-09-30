@@ -66,6 +66,8 @@ pub mod icons {
     pub const KEY: &str = "strata-key";
     pub const KEYBOARD: &str = "strata-keyboard";
     pub const MONITOR: &str = "strata-monitor";
+    pub const MAXIMIZE_2: &str = "strata-maximize-2";
+    pub const MINIMIZE_2: &str = "strata-minimize-2";
     pub const NETWORK: &str = "strata-network";
     pub const PALETTE: &str = "strata-palette";
     pub const PANEL_LEFT: &str = "strata-panel-left-symbolic";
