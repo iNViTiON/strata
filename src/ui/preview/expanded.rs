@@ -18,7 +18,7 @@ use layer::ExpandedLayer;
 type KeyHandler = Rc<dyn Fn(Key, ModifierType) -> Propagation>;
 
 pub(super) const EXPANDED_CLASS: &str = "preview-expanded";
-const TRANSITION_MS: f64 = 260.0;
+const TRANSITION_MS: f64 = 320.0;
 const SETTLE_FRAMES: u32 = 3;
 const MIN_FALLBACK_SIZE: i32 = 480;
 const MAX_SETTLE_FRAMES: u32 = 180;
@@ -38,12 +38,63 @@ pub(in crate::ui) enum ZoomStep {
     Fit,
 }
 
-/// The middle of the scrolled document as fractions of its size, so it can be
-/// found again after the content reflows to a new width.
-#[derive(Clone, Copy)]
+/// The middle row of the scrolled document, so it can be found again after
+/// the content reflows. A text view keeps a mark on the start of that row,
+/// since its scroll range is only an estimate until every line has been laid
+/// out; anything else uses a fraction of the scroll range. Sideways position
+/// only follows a document that was panned.
 struct Anchor {
-    horizontal: f64,
+    horizontal: Option<f64>,
     vertical: f64,
+    text: Option<(gtk::TextView, gtk::TextMark)>,
+}
+
+impl Anchor {
+    fn apply(&self, scroll: &gtk::ScrolledWindow) {
+        if let Some((view, mark)) = &self.text
+            && !mark.is_deleted()
+        {
+            view.scroll_to_mark(mark, 0.0, true, 0.0, 0.5);
+            return;
+        }
+        set_to_fraction(&scroll.hadjustment(), self.horizontal);
+        set_to_fraction(&scroll.vadjustment(), Some(self.vertical));
+    }
+}
+
+/// Puts the middle of the view at `fraction` of the range, or at the start.
+fn set_to_fraction(adjustment: &gtk::Adjustment, fraction: Option<f64>) {
+    let value = fraction.map_or(0.0, |fraction| {
+        fraction * adjustment.upper() - adjustment.page_size() / 2.0
+    });
+    set_adjustment_value(adjustment, value);
+}
+
+impl Drop for Anchor {
+    fn drop(&mut self) {
+        if let Some((_, mark)) = &self.text
+            && let Some(buffer) = mark.buffer()
+        {
+            buffer.delete_mark(mark);
+        }
+    }
+}
+
+/// Keeps an [`Anchor`] applied while the card's size changes.
+struct AnchorHold {
+    adjustments: Vec<(gtk::Adjustment, glib::SignalHandlerId)>,
+    tick: Option<gtk::TickCallbackId>,
+}
+
+impl Drop for AnchorHold {
+    fn drop(&mut self) {
+        for (adjustment, handler) in self.adjustments.drain(..) {
+            adjustment.disconnect(handler);
+        }
+        if let Some(tick) = self.tick.take() {
+            tick.remove();
+        }
+    }
 }
 
 #[derive(Default)]
@@ -51,7 +102,7 @@ pub(super) struct ExpandedState {
     this: RefCell<std::rc::Weak<PreviewState>>,
     available: Cell<bool>,
     layout_generation: Cell<u64>,
-    anchor: Cell<Option<Anchor>>,
+    anchor: RefCell<Option<Rc<Anchor>>>,
     relocating: Cell<bool>,
     collapsing: Cell<bool>,
     host: RefCell<Option<Host>>,
@@ -202,7 +253,10 @@ impl PreviewState {
             .and_then(|overlay| self.drawer_bounds(overlay));
         let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
         placeholder.add_css_class("preview-pane");
-        self.expanded.anchor.set(self.capture_anchor());
+        // The drawer keeps its width while the pane is away, so the card can
+        // land back on exactly the place it left.
+        placeholder.set_size_request(self.pane.width().max(MIN_WIDTH), -1);
+        self.expanded.anchor.replace(self.capture_anchor());
         self.expanded.relocating.set(true);
         self.revealer.set_child(Some(&placeholder));
         self.pane.add_css_class(EXPANDED_CLASS);
@@ -221,10 +275,13 @@ impl PreviewState {
         self.take_keyboard();
         match host {
             Host::Overlay { layer, .. } => {
+                let held = self.hold_anchor();
                 self.settle_layout(false);
                 let weak = Rc::downgrade(self);
                 layer.animate_to(1.0, TRANSITION_MS, move || {
+                    drop(held);
                     if let Some(state) = weak.upgrade() {
+                        state.expanded.anchor.take();
                         state.presentation_changed();
                     }
                 });
@@ -319,8 +376,11 @@ impl PreviewState {
             return;
         }
         layer.set_origin(self.drawer_bounds(&overlay));
+        self.expanded.anchor.replace(self.capture_anchor());
+        let held = self.hold_anchor();
         let weak = Rc::downgrade(self);
         layer.animate_to(0.0, TRANSITION_MS, move || {
+            drop(held);
             if let Some(state) = weak.upgrade() {
                 state.collapse_now();
             }
@@ -336,7 +396,13 @@ impl PreviewState {
             return;
         };
         self.expanded.collapsing.set(false);
-        self.expanded.anchor.set(self.capture_anchor());
+        // A card that shrank into the drawer is already laid out for it.
+        let laid_out = matches!(&host, Host::Overlay { layer, .. } if layer.rests_in_origin());
+        self.expanded.anchor.replace(if laid_out {
+            None
+        } else {
+            self.capture_anchor()
+        });
         // Pages that rebind in the smaller drawer must not ask for large renders.
         if let Some(view) = self.pdf_view.borrow().as_ref() {
             view.set_detail(PreviewDetail::Standard, self.media_preview_size());
@@ -427,7 +493,7 @@ impl PreviewState {
                 };
             }
             if let Some(anchor) = state.expanded.anchor.take() {
-                state.restore_anchor(anchor);
+                state.restore_anchor(&anchor);
             }
             if report {
                 state.presentation_changed();
@@ -436,31 +502,68 @@ impl PreviewState {
         });
     }
 
-    fn capture_anchor(&self) -> Option<Anchor> {
+    fn capture_anchor(&self) -> Option<Rc<Anchor>> {
         let scroll = self.primary_scroll()?;
-        let fraction = |adjustment: gtk::Adjustment| {
+        let fraction = |adjustment: &gtk::Adjustment| {
             (adjustment.upper() > 0.0)
                 .then(|| (adjustment.value() + adjustment.page_size() / 2.0) / adjustment.upper())
         };
-        Some(Anchor {
-            horizontal: fraction(scroll.hadjustment())?,
-            vertical: fraction(scroll.vadjustment())?,
-        })
+        let across = scroll.hadjustment();
+        let text = scroll
+            .child()
+            .and_downcast::<gtk::TextView>()
+            .and_then(|view| {
+                let visible = view.visible_rect();
+                let iter =
+                    view.iter_at_location(visible.x(), visible.y() + visible.height() / 2)?;
+                let mark = view.buffer().create_mark(None, &iter, true);
+                Some((view, mark))
+            });
+        Some(Rc::new(Anchor {
+            horizontal: fraction(&across).filter(|_| across.value() > 1.0),
+            vertical: fraction(&scroll.vadjustment())?,
+            text,
+        }))
     }
 
-    fn restore_anchor(&self, anchor: Anchor) {
-        let Some(scroll) = self.primary_scroll() else {
-            return;
-        };
-        for (adjustment, fraction) in [
-            (scroll.hadjustment(), anchor.horizontal),
-            (scroll.vadjustment(), anchor.vertical),
-        ] {
-            set_adjustment_value(
-                &adjustment,
-                fraction * adjustment.upper() - adjustment.page_size() / 2.0,
-            );
+    fn restore_anchor(&self, anchor: &Anchor) {
+        if let Some(scroll) = self.primary_scroll() {
+            anchor.apply(&scroll);
         }
+    }
+
+    /// Keeps the middle of the document in view while the card's size changes:
+    /// a text view is told to keep its mark centred every frame, other
+    /// documents are put back whenever their scroll ranges are recomputed.
+    fn hold_anchor(&self) -> Option<AnchorHold> {
+        let anchor = self.expanded.anchor.borrow().clone()?;
+        let scroll = self.primary_scroll()?;
+        if anchor.text.is_some() {
+            anchor.apply(&scroll);
+            let tick = self.pane.add_tick_callback(move |_, _| {
+                anchor.apply(&scroll);
+                glib::ControlFlow::Continue
+            });
+            return Some(AnchorHold {
+                adjustments: Vec::new(),
+                tick: Some(tick),
+            });
+        }
+        let adjustments = [
+            (scroll.hadjustment(), anchor.horizontal),
+            (scroll.vadjustment(), Some(anchor.vertical)),
+        ]
+        .into_iter()
+        .map(|(adjustment, fraction)| {
+            let handler =
+                adjustment.connect_changed(move |adjustment| set_to_fraction(adjustment, fraction));
+            (adjustment, handler)
+        })
+        .collect();
+        Some(AnchorHold {
+            adjustments,
+            tick: None,
+        })
     }
 
     fn drawer_bounds(&self, overlay: &gtk::Overlay) -> Option<gtk::graphene::Rect> {
