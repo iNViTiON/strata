@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -13,6 +14,7 @@
     {
       self,
       nixpkgs,
+      crane,
       rust-overlay,
     }:
     let
@@ -232,11 +234,9 @@
 
           strata = pkgs.callPackage ./nix/package.nix {
             # rust-src would make std's panic locations point into the store.
-            rustPlatform = pkgs.makeRustPlatform {
-              cargo = rustMinimal;
-              rustc = rustMinimal;
-            };
+            craneLib = (crane.mkLib pkgs).overrideToolchain rustMinimal;
             toolchain = rustMinimal;
+            cargoVersion = cargoManifest.package.version;
             version = "${cargoManifest.package.version}+fork.${shortRev}";
             commit = self.rev or self.dirtyRev or "unknown";
             src = lib.fileset.toSource {
@@ -315,6 +315,8 @@
         {
           inherit strata;
           default = strata;
+          # Cached separately, so a release only compiles the application.
+          strata-deps = strata.cargoArtifacts;
         }
       );
 

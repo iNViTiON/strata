@@ -40,17 +40,20 @@ jobs:
     steps:
       # GITHUB_TOKEN cannot push commits that touch .github/workflows.
       - name: Check out the fork with the sync token
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.SYNC_PAT }}
+          persist-credentials: true
           ref: ${{ env.DEV_BRANCH }}
           fetch-depth: 0
 
+      # In the background: the deletion takes minutes, and the space is only
+      # needed once the image and the Nix build arrive.
       - name: Free disk space for the Nix store and the quality image
-        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+        run: nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL > /dev/null 2>&1 &
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
 
       # Pull only; the push below runs for published builds alone, while the
       # daemon mode would upload during the build, even from failed runs.
@@ -83,12 +86,14 @@ jobs:
       # Cachix skips paths cache.nixos.org already serves, so this uploads only
       # what the fork builds itself. Consumers hit it only when they evaluate the
       # same derivation: `release` with this flake.lock, no nixpkgs follows.
+      # strata-deps is every compiled dependency; with it cached, later builds
+      # (here and on other machines) compile only the application.
       - name: Upload the published package to Cachix
         if: steps.assemble.outputs.tag != ''
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
           CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
-        run: nix build .#strata --no-link --print-out-paths | cachix push invition
+        run: nix build .#strata .#strata-deps --no-link --print-out-paths | cachix push invition
 
       - name: Report the failed release in an issue
         if: failure()
@@ -158,13 +163,13 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Check out the published release
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.assemble.outputs.tag }}
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
 
       - name: Use the Cachix cache
         uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -176,7 +181,7 @@ jobs:
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
           CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
-        run: nix build .#strata --print-out-paths -L | cachix push invition
+        run: nix build .#strata .#strata-deps --no-link --print-out-paths -L | cachix push invition
 
   # Binaries for other distributions. Keyed on the newest version tag without a
   # GitHub Release rather than on this run's publish, so a failed build is
@@ -228,7 +233,7 @@ jobs:
       TARGET: ${{ matrix.target }}
     steps:
       - name: Check out the release
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.pending.outputs.tag }}
           persist-credentials: false
