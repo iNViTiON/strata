@@ -162,6 +162,10 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
             None,
         ),
         "preview-image" | "document-image" => (document_media::image(input, 800)?, None),
+        "preview-image-expanded" => (
+            document_media::image(input, crate::sandbox::EXPANDED_IMAGE_EDGE)?,
+            None,
+        ),
         "document-mermaid" => (document_media::mermaid(input)?, None),
         "document-math" => (document_media::math(input, true)?, None),
         "document-inline-math" => (document_media::math(input, false)?, None),
@@ -391,6 +395,10 @@ pub(crate) fn browser_render(
         }
         Operation::PreviewImage => {
             response.png = document_media::image(input, 800).unwrap_or_default();
+        }
+        Operation::PreviewImageExpanded => {
+            response.png = document_media::image(input, crate::sandbox::EXPANDED_IMAGE_EDGE)
+                .unwrap_or_default();
         }
         Operation::DocumentMermaid => {
             response.png = document_media::mermaid(input).unwrap_or_default();
@@ -736,7 +744,7 @@ fn render_pdf_page(
     let page = document
         .page(page_index)
         .ok_or_else(|| "Unable to load that PDF page".to_owned())?;
-    let size = PdfRenderSize::new(size.width, size.height);
+    let size = size.normalized();
     let (_, _, max_pixels) = size.image_limits();
     let (page_width, page_height) = page.size();
     if page_width <= 0.0 || page_height <= 0.0 {
@@ -852,6 +860,11 @@ fn pdf_render_request(value: &str) -> Result<(i32, PdfRenderSize), String> {
     let page = page
         .parse::<i32>()
         .map_err(|_| "Invalid PDF preview page".to_owned())?;
+    let (dimensions, expanded) = match dimensions.split_once(':') {
+        Some((dimensions, "e")) => (dimensions, true),
+        Some(_) => return Err("Invalid PDF preview request".to_owned()),
+        None => (dimensions, false),
+    };
     let (width, height) = dimensions
         .split_once('x')
         .ok_or_else(|| "Invalid PDF preview dimensions".to_owned())?;
@@ -860,13 +873,32 @@ fn pdf_render_request(value: &str) -> Result<(i32, PdfRenderSize), String> {
             .parse::<i32>()
             .map_err(|_| "Invalid PDF preview dimensions".to_owned())
     };
-    Ok((page, PdfRenderSize::new(parse(width)?, parse(height)?)))
+    let (width, height) = (parse(width)?, parse(height)?);
+    let size = if expanded {
+        PdfRenderSize::new_expanded(width, height)
+    } else {
+        PdfRenderSize::new(width, height)
+    };
+    Ok((page, size))
 }
 
 fn media_preview_size(value: &str) -> Result<MediaPreviewSize, String> {
     if value == "0" {
         return Ok(MediaPreviewSize::new(1280, 1280));
     }
+    let (value, expanded) = match value.split_once(":e") {
+        Some((size, rate)) => {
+            let fps = match rate.strip_prefix('@') {
+                None if rate.is_empty() => 30,
+                Some(fps) => fps
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid media preview frame rate".to_owned())?,
+                None => return Err("Invalid media preview dimensions".to_owned()),
+            };
+            (size, Some(fps))
+        }
+        None => (value, None),
+    };
     let (width, height) = value
         .split_once('x')
         .ok_or_else(|| "Invalid media preview dimensions".to_owned())?;
@@ -875,7 +907,14 @@ fn media_preview_size(value: &str) -> Result<MediaPreviewSize, String> {
             .parse::<i32>()
             .map_err(|_| "Invalid media preview dimensions".to_owned())
     };
-    Ok(MediaPreviewSize::new(parse(width)?, parse(height)?))
+    let (width, height) = (parse(width)?, parse(height)?);
+    Ok(match expanded {
+        Some(fps) => MediaPreviewSize {
+            max_fps: if fps >= 60 { 60 } else { 30 },
+            ..MediaPreviewSize::expanded(width, height)
+        },
+        None => MediaPreviewSize::new(width, height),
+    })
 }
 
 fn bounded_output_with_timeout(

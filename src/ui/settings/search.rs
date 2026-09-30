@@ -60,6 +60,18 @@ const TARGETS: &[Target] = &[
         aliases: "browsing video audio gif playback paused sound",
     },
     Target {
+        id: "expanded-preview-style",
+        page: "general",
+        title: "Expanded preview style",
+        aliases: "quick preview overlay fullscreen window large big",
+    },
+    Target {
+        id: "expanded-preview-shift",
+        page: "general",
+        title: "Hold Shift to control the preview",
+        aliases: "expanded quick preview keyboard arrows seek scroll page next previous file",
+    },
+    Target {
         id: "arrow-scope",
         page: "general",
         title: "Keep arrows in file list",
