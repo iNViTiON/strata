@@ -97,6 +97,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
     saved.remove("folder_peeking");
     saved.remove("columns_show_sizes");
     saved.remove("language");
+    saved.remove("preload_neighbor_previews");
     let restored: Preferences = saved.try_into().expect("backward-compatible preferences");
     assert_eq!(
         restored,
@@ -111,6 +112,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
             file_icon_colors: FileIconColors::Brand,
             folder_peeking: false,
             columns_show_sizes: true,
+            preload_neighbor_previews: false,
             ..non_default_preferences()
         }
     );
@@ -815,6 +817,7 @@ fn every_saved_preference_loads_before_any_settings_page_exists() {
                 ExpandedPreviewStyle::Fullscreen
             );
             assert!(!manager.expanded_preview_shift_controls());
+            assert!(manager.preload_neighbor_previews());
             assert_eq!(manager.auto_refresh_interval(), 600);
             assert_eq!(manager.thumbnail_workers(), 6);
             assert_eq!(
@@ -1179,6 +1182,7 @@ fn all_preference_setters_publish_and_persist_without_duplicate_notifications() 
                 |m| m.set_preview_autoplay(false),
                 |m| m.set_expanded_preview_style(ExpandedPreviewStyle::Overlay),
                 |m| m.set_expanded_preview_shift_controls(true),
+                |m| m.set_preload_neighbor_previews(false),
                 |m| m.set_auto_refresh_interval(60),
                 |m| m.set_thumbnail_workers(3),
                 |m| m.set_icons_thumbnail_size(96),
