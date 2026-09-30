@@ -11,7 +11,7 @@ use crate::{
     ui::{
         browser_modes::{BrowserMode, ClickActivation, ClickCount},
         controls::{menu_option, segmented_control},
-        preferences::PreferenceManager,
+        preferences::{PreferenceManager, TypingMode},
     },
 };
 
@@ -308,6 +308,33 @@ fn append_preference_switch(
     if switch.title == "10xer mode" {
         append_experimental_label(&row, manager);
     }
+    content.append(&row);
+    if switch.title == "Type to search" {
+        append_typing_mode_option(content, manager);
+    }
+}
+
+fn append_typing_mode_option(content: &gtk::Box, manager: &Rc<PreferenceManager>) {
+    const TITLE: &str = "Default typing mode";
+    const DESCRIPTION: &str = "What letters do while Type to search is off. Vim keys keep h, j, k and l as arrows and start jumping with /; Jump to name jumps to the file whose name starts with what you type.";
+    let control = super::bindings::choice_menu(
+        manager,
+        TITLE,
+        &[
+            ("Vim keys", TypingMode::VimKeys),
+            ("Jump to name", TypingMode::JumpToName),
+        ],
+        PreferenceManager::typing_mode,
+        PreferenceManager::set_typing_mode,
+    );
+    manager.bind_preference(
+        &control,
+        PreferenceManager::type_to_search,
+        |widget, enabled| widget.set_sensitive(!enabled),
+    );
+    let row = super::control_row(TITLE, DESCRIPTION, &control);
+    super::indent_row(&row);
+    bind_tenxer_unused_subtitle(&row, manager, DESCRIPTION);
     content.append(&row);
 }
 

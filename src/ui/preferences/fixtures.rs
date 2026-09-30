@@ -17,6 +17,7 @@ pub(in crate::ui) fn non_default_preferences() -> Preferences {
         video_preview_backend: "vulkan".into(),
         search_open_files_directly: true,
         type_to_search: false,
+        typing_mode: TypingMode::JumpToName,
         arrow_navigation_scoped: true,
         tenxer_mode: true,
         filter_include_subfolders: false,
