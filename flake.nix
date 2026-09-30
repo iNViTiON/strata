@@ -1,5 +1,5 @@
 {
-  description = "NixOS development shell for Strata (nix-dev branch only)";
+  description = "NixOS development shell and package for Strata (fork's nix-dev branch)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -20,6 +20,8 @@
       pkgs = import nixpkgs {
         inherit system;
         overlays = [ rust-overlay.overlays.default ];
+        # The package links UnRAR (unfree); nothing else here is allowed to be.
+        config.allowUnfreePredicate = pkg: lib.getName pkg == "strata";
       };
       lib = pkgs.lib;
 
@@ -203,8 +205,43 @@
             }
         '';
       };
+
+      cargoManifest = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+      shortRev = self.shortRev or self.dirtyShortRev or "unknown";
+
+      strata = pkgs.callPackage ./nix/package.nix {
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rust;
+          rustc = rust;
+        };
+        version = "${cargoManifest.package.version}+fork.${shortRev}";
+        commit = self.rev or self.dirtyRev or "unknown";
+        src = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.difference ./. (
+            lib.fileset.unions (
+              map lib.fileset.maybeMissing [
+                ./.github
+                ./.mise
+                ./.release
+                ./docs
+                ./nix
+                ./packaging
+                ./flake.nix
+                ./flake.lock
+                ./NIX.md
+              ]
+            )
+          );
+        };
+      };
     in
     {
+      packages.${system} = {
+        inherit strata;
+        default = strata;
+      };
+
       devShells.${system}.default = pkgs.mkShell {
         packages = [
           cargo
@@ -236,6 +273,8 @@
           MISE_EXEC_AUTO_INSTALL = "false";
           MISE_TASK_RUN_AUTO_INSTALL = "false";
           MISE_NOT_FOUND_AUTO_INSTALL = "false";
+          # .release/assemble.sh trains rerere from earlier release merges.
+          GIT_RERERE_TRAIN = "${pkgs.git}/share/git/contrib/rerere-train.sh";
         };
 
         # The headless harness looks for AT-SPI daemons in FHS libexec paths, then PATH.
