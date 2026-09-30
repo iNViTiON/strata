@@ -24,14 +24,16 @@
 #   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #   SOFTWARE.
 #
-# Changes from his package: builds the local tree with the dev shell's pinned
-# toolchain and Cargo.lock, patches every sandbox call site the current source
-# has, extends the helper PATH, binds /run/opengl-driver for VA-API, and marks
-# the bundled UnRAR license.
+# Changes from his package: builds the local tree with crane, the pinned
+# toolchain and Cargo.lock (dependencies as their own cached derivation),
+# patches every sandbox call site the current source has, extends the helper
+# PATH, binds /run/opengl-driver for VA-API, and marks the bundled UnRAR
+# license.
 {
   lib,
-  rustPlatform,
+  craneLib,
   toolchain,
+  cargoVersion,
   src,
   version,
   commit,
@@ -71,12 +73,36 @@ let
   # trusted_command also finds a system bwrap on NixOS; the store copy keeps
   # the package working without bubblewrap in environment.systemPackages.
   bwrap = ''Ok::<_, String>(std::path::PathBuf::from("${lib.getExe bubblewrap}"))'';
-in
-rustPlatform.buildRustPackage {
-  pname = "strata";
-  inherit version src;
 
-  cargoLock.lockFile = ../Cargo.lock;
+  buildInputs = [
+    cairo
+    fontconfig
+    gdk-pixbuf
+    glib
+    gst_all_1.gstreamer
+    gst_all_1.gst-plugins-base
+    gtk4
+    gtksourceview5
+    pango
+    poppler
+  ];
+
+  # Every dependency, compiled once per Cargo.lock and toolchain: crane builds
+  # it from a stub of the sources, so application changes reuse it. The version
+  # stays the Cargo one, not the release's, for the same reason.
+  cargoArtifacts = craneLib.buildDepsOnly {
+    pname = "strata";
+    version = cargoVersion;
+    inherit src buildInputs;
+    strictDeps = true;
+    nativeBuildInputs = [ pkg-config ];
+    doCheck = false;
+  };
+in
+craneLib.buildPackage {
+  pname = "strata";
+  inherit version src cargoArtifacts;
+  strictDeps = true;
 
   # The sandbox is written for an FHS host: bind the store instead of /usr, give
   # helpers a store PATH and the gdk-pixbuf loader cache (bwrap clears the
@@ -111,23 +137,14 @@ rustPlatform.buildRustPackage {
     wrapGAppsHook4
   ];
 
-  buildInputs = [
-    cairo
-    fontconfig
-    gdk-pixbuf
-    glib
-    gst_all_1.gstreamer
-    gst_all_1.gst-plugins-base
-    gtk4
-    gtksourceview5
-    pango
-    poppler
-  ];
+  inherit buildInputs;
 
   # The suite drives real GTK widgets and Bubblewrap, which the build sandbox lacks.
   doCheck = false;
 
   disallowedReferences = [ toolchain ];
+
+  passthru = { inherit cargoArtifacts; };
 
   postInstall = ''
     install -Dm644 data/io.github.lgse.Strata.desktop \
