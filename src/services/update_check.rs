@@ -17,9 +17,9 @@ use super::{
     release_channel::{BuildKind, Channel, ReleaseSummary, Version, best_update, rollback_target},
 };
 
-const API_ROOT: &str = "https://api.github.com/repos/lgse/strata/releases";
-const COMMITS_ROOT: &str = "https://api.github.com/repos/lgse/strata/commits";
-const RELEASES_URL: &str = "https://github.com/lgse/strata/releases";
+const API_ROOT: &str = "https://api.github.com/repos/iNViTiON/strata/releases";
+const COMMITS_ROOT: &str = "https://api.github.com/repos/iNViTiON/strata/commits";
+const RELEASES_URL: &str = "https://github.com/iNViTiON/strata/releases";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// Minimum interval between automatic checks against the same channel.
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
