@@ -72,6 +72,8 @@ control that might be midway through synchronization.
 | Browser and chooser column widths | A Columns resize or a List heading resize, including double-click autofit, saves the unscaled width. New columns and rebuilt List panes read the latest saved defaults before Settings opens. Existing panes retain their own widths; resizing one window does not resize another. Browser defaults (`browser_column_width`, `browser_list_columns`) and chooser defaults (`chooser_column_width`, `chooser_list_columns`) are independent. The Name column keeps expanding until it is resized itself. Not exposed in Settings. |
 | Icons view thumbnail size | Every browser binds at construction, before the browser mode preference applies, so an Icons pane built at startup already uses the saved size. The popover slider's own live change persists it; other windows' visible Icons panes move their slider (and resize) to match. Clamped to 32–256 px; not exposed in Settings. |
 | Hardware video acceleration/backend | Preview providers read the current choice when requesting a preview; changing it does not restart an already playing file. Settings controls and backend availability synchronize live. |
+| Expanded preview style | Read each time a preview is expanded, so a change applies to the next expand in every window. Overlay is the default; Fullscreen window opens a separate fullscreen window. See [Expanded preview](keyboard-navigation.md#expanded-preview). |
+| Hold Shift to control the preview | The window's key dispatch reads the current choice on every arrow pressed in the expanded preview, so a change applies across windows immediately. On by default. See [Expanded preview](keyboard-navigation.md#expanded-preview). |
 | Preview text wrap | Every text preview and header toggle binds to the saved wrap choice, including newly loaded files. Off by default. |
 | Preview autoplay | Read when a video, audio, or GIF preview is first shown. Off by default: playback waits for an explicit play action, and the center play affordance is shown instead. Does not affect resuming playback that was already active before a preview pane was temporarily hidden by a resize. |
 | Render documents by default | A newly loaded Markdown or HTML preview reads the current choice for its initial Rendered or Source view. Switching the view of an open document does not change the saved default. |
@@ -216,6 +218,20 @@ on by default. Turn it off to match only immediate files and folders, without
 redundant path subtitles. The choice applies to pane filtering in Columns, Icons,
 and List views, not global search.
 Changing it refreshes active filters across windows and is saved for next launch.
+
+## Expanded preview
+
+**Settings → General → Expanded preview → Expanded preview style** chooses
+**Overlay** (default), a large layer over Strata's window that grows out of the
+drawer and shrinks back into it (instantly with **Reduce motion**), or **Fullscreen
+window**, a separate window opened fullscreen on the main window's monitor whose
+opening and closing animation belongs to the compositor. It is read when the preview is
+expanded; a preview that is already expanded keeps its style.
+
+**Hold Shift to control the preview** is on by default. In the expanded preview, Shift + arrow keys then drive the
+preview (seek, scroll, turn pages, pan) and plain arrows move to the previous or
+next file. Turn it off to swap the two. The small preview is unaffected. The
+choice is read when each key is pressed, not cached per window.
 
 ## 10xer mode
 

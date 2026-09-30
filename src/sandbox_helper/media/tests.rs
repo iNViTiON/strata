@@ -85,6 +85,44 @@ fn raw_software_video_fits_landscape_portrait_hidpi_and_does_not_enlarge() {
 }
 
 #[test]
+fn the_expanded_view_decodes_at_the_source_frame_rate_up_to_the_screen_cap() {
+    let directory = tempfile::tempdir().expect("fixtures");
+    let fast = directory.path().join("fast.mkv");
+    fixture(&fast, "320x180", 60, 1, true);
+
+    let (header, frames, end) = decoded(&fast, "640x360:e@60", 0);
+    assert_eq!((header.fps, header.native_fps), (60, 60));
+    assert_eq!(frames.len(), 60);
+    assert!(frames.iter().all(|frame| frame.samples.len() == 3_200));
+    assert_eq!(end, 1_000_000);
+
+    let (header, frames, _) = decoded(&fast, "640x360:e@30", 0);
+    assert_eq!((header.fps, header.native_fps), (30, 60), "a slower screen");
+    assert_eq!(frames.len(), 30);
+
+    let (header, frames, _) = decoded(&fast, "640x360", 0);
+    assert_eq!((header.fps, header.native_fps), (30, 60), "the drawer");
+    assert_eq!(frames.len(), 30);
+
+    let (header, frames, _) = decoded(&fast, "640x360:e@60", 15);
+    assert_eq!(
+        header.start_tick, 30,
+        "half a second in, at 60 ticks a second"
+    );
+    assert_eq!(frames[0].tick, 30);
+    assert_eq!(frames.len(), 30);
+
+    let slow = directory.path().join("slow.mkv");
+    fixture(&slow, "320x180", 24, 1, false);
+    let (header, _, _) = decoded(&slow, "640x360:e@60", 0);
+    assert_eq!(
+        (header.fps, header.native_fps),
+        (30, 30),
+        "a slow source stays at 30"
+    );
+}
+
+#[test]
 fn full_sources_and_hour_long_seeks_reach_the_original_file_end() {
     let directory = tempfile::tempdir().expect("fixture");
     for (seconds, audio, starts) in [
@@ -301,11 +339,14 @@ fn hardware_order_and_commands_decode_only_and_bound_all_outputs() {
             audio: true,
             duration_us: 3_600_000_000,
             start_tick: 107850,
+            fps: 30,
+            native_fps: 30,
         },
         video: Some(0),
         audio: Some(1),
         cover: false,
         gif_period_us: None,
+        expanded: false,
     };
     for backend in backends(&devices, MediaPreviewBackend::Automatic) {
         let command = command(Path::new("/input"), &input, &backend, Track::Video);
@@ -318,6 +359,7 @@ fn hardware_order_and_commands_decode_only_and_bound_all_outputs() {
         assert!(args.contains("-t 5.000000"));
         assert!(args.contains("-frames:v 150"));
         assert!(args.contains("-c:v rawvideo"));
+        assert!(args.contains("flags=fast_bilinear"));
         let audio = command_for_audio(&input);
         assert!(audio.contains("-c:a pcm_s16le"));
         assert!(!audio.contains("-hwaccel"));
@@ -325,6 +367,22 @@ fn hardware_order_and_commands_decode_only_and_bound_all_outputs() {
         assert!(!args.contains("libvpx"));
         assert!(!args.contains(" copy"));
     }
+    let expanded = Input {
+        expanded: true,
+        ..input
+    };
+    let args = command(
+        Path::new("/input"),
+        &expanded,
+        &Backend::Software,
+        Track::Video,
+    )
+    .get_args()
+    .map(|arg| arg.to_string_lossy())
+    .collect::<Vec<_>>()
+    .join(" ");
+    assert!(args.contains("flags=bilinear"), "{args}");
+    assert!(!args.contains("fast_bilinear"));
 }
 
 fn command_for_audio(input: &Input) -> String {
