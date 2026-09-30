@@ -79,6 +79,21 @@ cache serves only the build pinned by this flake's `flake.lock`, and anything
 else compiles from source. To pin a release, use a tag, for example
 `github:iNViTiON/strata/fork-release-20260930-1`.
 
+## Other distributions
+
+Each release is also published on the
+[Releases page](https://github.com/iNViTiON/strata/releases) as x86_64 and
+aarch64 archives built the same way as upstream's, with checksums and build
+attestations. The fork's `install.sh` installs the latest one:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iNViTiON/strata/release/install.sh | bash
+```
+
+The in-app updater of these builds follows this fork's releases (the Nightly
+channel). Coming from an upstream install, pick Nightly once under Settings →
+Updates.
+
 ## Credits
 
 - [Strata](https://github.com/lgse/strata) by lgse, MIT licensed. The bundled
