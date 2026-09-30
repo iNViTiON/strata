@@ -17,8 +17,11 @@ Usage: .release/assemble.sh [options]
 
   --source local|origin  Merge local branches (default) or the remote's copies.
   --if-changed           Stop when the published manifest already matches.
-  --checks none|local|ci Run checks on the assembled tree (default: none).
+  --checks none|local    Run the local checks on the assembled tree (default: none).
   --publish              Tag and push the release (requires --source origin).
+  --candidate            For CI: push the assembled commit to <release>-candidate
+                         and report the tags it would get; CI checks and builds
+                         that commit in parallel jobs, then publishes it.
   --no-fetch             Skip fetching the remote.
   -h, --help             Show this help.
 
@@ -40,6 +43,7 @@ source=local
 if_changed=false
 checks=none
 publish=false
+candidate=false
 fetch=true
 
 while (($#)); do
@@ -48,6 +52,7 @@ while (($#)); do
     --if-changed) if_changed=true ;;
     --checks) checks="${2:?}"; shift ;;
     --publish) publish=true ;;
+    --candidate) candidate=true ;;
     --no-fetch) fetch=false ;;
     -h | --help) usage; exit 0 ;;
     *) usage >&2; exit 1 ;;
@@ -55,9 +60,9 @@ while (($#)); do
   shift
 done
 case "$source" in local | origin) ;; *) echo "error: --source must be local or origin" >&2; exit 1 ;; esac
-case "$checks" in none | local | ci) ;; *) echo "error: --checks must be none, local or ci" >&2; exit 1 ;; esac
-if $publish && [[ "$source" != origin ]]; then
-  echo "error: --publish needs --source origin, so every published commit is already on $remote" >&2
+case "$checks" in none | local) ;; *) echo "error: --checks must be none or local" >&2; exit 1 ;; esac
+if { $publish || $candidate; } && [[ "$source" != origin ]]; then
+  echo "error: --publish and --candidate need --source origin, so every published commit is already on $remote" >&2
   exit 4
 fi
 
@@ -233,11 +238,6 @@ run_checks() {
       nix_build
       capped ./scripts/e2e.sh
       ;;
-    ci)
-      ./scripts/quality.sh all
-      for task in deny typos scripts; do mise run "$task"; done
-      nix_build
-      ;;
   esac
 }
 if [[ "$checks" != none ]]; then
@@ -248,7 +248,7 @@ if [[ "$checks" != none ]]; then
   fi
 fi
 
-if $publish; then
+if $publish || $candidate; then
   day="$(date -u +%Y%m%d)"
   n=1
   while git rev-parse --verify --quiet "refs/tags/$tag_prefix$day-$n" > /dev/null; do n=$((n + 1)); done
@@ -260,6 +260,17 @@ if $publish; then
   version="$(python3 scripts/release_version.py --current-version "$core" --bump patch \
     --mode nightly --date "$day" --tags "$version_tags")"
   version_tag="v$version"
+fi
+
+if $candidate; then
+  say "Pushing the candidate for $tag and $version_tag"
+  git push --force "$remote" "HEAD:refs/heads/$release-candidate"
+  output "tag=$tag"
+  output "version_tag=$version_tag"
+  output "published=$published"
+fi
+
+if $publish; then
   say "Publishing $release as $tag and $version_tag"
   git tag -a "$tag" -m "Fork release $tag" -m "$manifest"
   git tag -a "$version_tag" -m "Fork release $tag" -m "$manifest"
