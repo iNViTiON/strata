@@ -168,9 +168,15 @@ fetchable after `release` is force-pushed.
 
 ### The package
 
-`nix build .#strata` (also `.#default`) builds this tree with the dev shell's
-Rust toolchain and `Cargo.lock`, so there is no `cargoHash` to maintain. It is
-based on Th1nkK1D's package (credit and MIT notice in `nix/package.nix`). The
+`nix build .#strata` (also `.#default`) builds this tree with
+[crane](https://crane.dev), the pinned Rust version and `Cargo.lock`, so there
+is no `cargoHash` to maintain. The dependencies are a separate derivation,
+`.#strata-deps`, which changes only with `Cargo.lock`, `Cargo.toml` or the
+toolchain; CI uploads it to Cachix, so a release, and a local build with the
+cache configured, compiles only the application. The package uses the minimal
+toolchain profile: with `rust-src`, std's panic locations would keep the whole
+toolchain in the closure (`disallowedReferences` guards this). It is based on
+Th1nkK1D's package (credit and MIT notice in `nix/package.nix`). The
 patches point the preview sandbox at the store instead of `/usr` in every
 `src/sandbox*` call site, pin `bwrap` and `prlimit`, give the helpers a store
 `PATH`, and bind `/run/opengl-driver` so VA-API works in the sandbox. Each
