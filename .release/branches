@@ -1,0 +1,6 @@
+# Branches merged into `release` on top of nix-dev, in this order.
+# See "Releases" in NIX.md before adding one.
+base/preview-seams
+feat/jump-to-name
+feat/preload-neighbor-previews
+feat/expanded-preview
