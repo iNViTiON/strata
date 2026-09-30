@@ -1,9 +1,10 @@
 # Nix development environment (fork only)
 
 This file, `flake.nix`, `flake.lock`, `.envrc`, `nix/`, `.release/`,
-`.mise/tasks/release` and the `sync-upstream.yml` and `assemble-release.yml`
-workflows exist only on the fork's `nix-dev` branch (and `release`, built from
-it). `main` mirrors `lgse/strata` exactly; never commit to it.
+`.mise/tasks/release`, `.github/README.md` (the fork's landing page) and the
+`sync-upstream.yml` and `assemble-release.yml` workflows exist only on the
+fork's `nix-dev` branch (and `release`, built from it). `main` mirrors
+`lgse/strata` exactly; never commit to it.
 
 ## Branches
 
@@ -170,17 +171,27 @@ the flake allows unfree for `strata` only.
 To install it from the NixOS configuration:
 
 ```nix
-inputs.strata = {
-  url = "github:iNViTiON/strata/release";
-  inputs.nixpkgs.follows = "nixpkgs-unstable";
-};
+inputs.strata.url = "github:iNViTiON/strata/release";
 
 # in an overlay
 strata = inputs.strata.packages.${prev.stdenv.hostPlatform.system}.strata;
+
+# the fork's binary cache
+nix.settings = {
+  substituters = [ "https://invition.cachix.org" ];
+  trusted-public-keys = [ "invition.cachix.org-1:UBnayz18duoQrchGIMu740K49/WVsaa8dThirDR/Hd4=" ];
+};
 ```
 
 `nix flake update strata` then picks up the latest release. The VA-API bind is
 already in the package; do not add it again in an overlay.
+
+CI uploads every release it publishes to the `invition` Cachix cache (only the
+paths cache.nixos.org does not already serve). A download needs the exact
+derivation CI built, so do not set `inputs.nixpkgs.follows` (or override
+`rust-overlay`): the fork's own `flake.lock` must drive the build. With
+`follows`, the package still builds, just from source. Releases published
+locally with `--publish` are not uploaded; the next CI release is.
 
 ### Adding or removing a feature
 
@@ -235,7 +246,8 @@ a successful "Sync upstream", every six hours, and on demand. It skips when
 the published manifest already matches, otherwise assembles from `origin/*`,
 runs upstream's pinned-container `scripts/quality.sh` plus `deny`, `typos`,
 the script tests and `nix build .#strata`, then tags and pushes with
-`SYNC_PAT` (`GITHUB_TOKEN` cannot push commits that touch workflows). On a
+`SYNC_PAT` (`GITHUB_TOKEN` cannot push commits that touch workflows) and
+uploads the package to Cachix (`CACHIX_AUTH_TOKEN`, `CACHIX_SIGNING_KEY`). On a
 conflict or failure it pushes nothing and opens or updates an issue labeled
 `release-failed`. A `push` trigger on feature branches cannot work: GitHub
 reads it from the pushed branch's copy of the workflow, and feature branches
