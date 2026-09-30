@@ -204,9 +204,9 @@ already in the package; do not add it again in an overlay.
 
 The flake provides the package and the dev shell for `x86_64-linux` and
 `aarch64-linux`. CI uploads every release it publishes to the `invition` Cachix
-cache for both (only the paths cache.nixos.org does not already serve): the
-`assemble` job for x86_64 after its checks, and the `nix-aarch64` job on an ARM
-runner, which builds the same published commit without rerunning the checks. A download needs the exact
+cache for both (only the paths cache.nixos.org does not already serve). Cachix
+evicts the least recently used paths once the cache is full, so old releases
+and dependency builds make room for new ones. A download needs the exact
 derivation CI built, so do not set `inputs.nixpkgs.follows` (or override
 `rust-overlay`): the fork's own `flake.lock` must drive the build. With
 `follows`, the package still builds, just from source. Releases published
@@ -256,6 +256,9 @@ it stops:
    branch and replays the recorded resolution.
 4. Publish that rebuild. CI has no `rr-cache` of its own and learns the
    resolution only from published release merges.
+5. A local publish uploads nothing to Cachix or GitHub Releases, and CI then
+   sees a matching manifest and skips. Have CI rebuild it:
+   `gh workflow run assemble-release.yml -R iNViTiON/strata --ref nix-dev -f force=true`.
 
 A conflict that keeps returning belongs in the feature branch: rebase it and
 drop the resolution.
@@ -263,16 +266,31 @@ drop the resolution.
 ### CI
 
 `.github/workflows/assemble-release.yml` ("Assemble fork release") runs after
-a successful "Sync upstream", every six hours, and on demand. It skips when
-the published manifest already matches, otherwise assembles from `origin/*`,
-runs upstream's pinned-container `scripts/quality.sh` plus `deny`, `typos`,
-the script tests and `nix build .#strata`, then tags and pushes with
-`SYNC_PAT` (`GITHUB_TOKEN` cannot push commits that touch workflows) and
-uploads the package to Cachix (`CACHIX_AUTH_TOKEN`, `CACHIX_SIGNING_KEY`). On a
-conflict or failure it pushes nothing and opens or updates an issue labeled
-`release-failed`. A `push` trigger on feature branches cannot work: GitHub
-reads it from the pushed branch's copy of the workflow, and feature branches
-come from `main`; the schedule picks their pushes up instead.
+a successful "Sync upstream", every six hours, and on demand:
+
+1. `assemble` merges from `origin/*` (`assemble.sh --candidate`), skipping the
+   run when the published manifest already matches, and pushes the result to
+   `release-candidate`. On a conflict it stops and reports the files.
+2. In parallel, on that one commit: `checks` (upstream's pinned-container
+   `scripts/quality.sh` plus `deny`, `typos` and the script tests), `nix` (the
+   package for x86_64 and aarch64) and `binaries` (the archives for both).
+3. `publish`, only when all of them pass: uploads the packages to Cachix
+   (`CACHIX_AUTH_TOKEN`, `CACHIX_SIGNING_KEY`), attests the archives, then
+   moves `release` and pushes both tags with `SYNC_PAT` (`GITHUB_TOKEN` cannot
+   push commits that touch workflows), deletes the candidate and publishes the
+   GitHub Release.
+
+Nothing reaches `release`, the tags, Cachix or the Releases page from a
+candidate that failed. The `nix` jobs therefore upload nothing themselves:
+they export the store paths no cache serves yet as an artifact, and `publish`
+imports and uploads them. `release` moves only after those uploads worked, so
+a failure before that changes nothing and the next run retries; if only the
+GitHub Release is missing afterwards, "Re-run failed jobs" creates it. Any
+failure opens or updates an issue labeled `release-failed`.
+
+A `push` trigger on feature branches cannot work: GitHub reads it from the
+pushed branch's copy of the workflow, and feature branches come from `main`;
+the schedule picks their pushes up instead.
 
 Upstream's publishing workflows cannot fire from `release` or its tags:
 `release.yml` is `workflow_dispatch` only, and `packaging.yml`,
@@ -293,9 +311,7 @@ because the in-app updater and `install.sh` only understand that grammar. The
 workflow's `binaries` jobs build it natively on Ubuntu for x86_64 and aarch64,
 exactly like upstream's `release.yml` (same archive names and layout, with
 `STRATA_RELEASE_TAG`, `STRATA_BUILD_KIND=nightly` and the commit baked in),
-attest the archives, and publish a GitHub Release marked latest. They pick the
-newest version tag that has no release yet, so a failed build is retried by
-the next run even when nothing else changed.
+and `publish` attests the archives and creates a GitHub Release marked latest.
 
 `fork/distribution` (from `main`, last in `.release/branches`, never
 upstreamed) points the updater, its Settings links and `install.sh` at this
