@@ -55,6 +55,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
     saved.remove("send_to_recent_destinations");
     saved.remove("tenxer_mode");
     saved.remove("typing_mode");
+    saved.remove("preload_neighbor_previews");
     let restored: Preferences = saved.try_into().expect("backward-compatible preferences");
     assert_eq!(
         restored,
@@ -65,6 +66,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
             send_to_recent_destinations: HashMap::new(),
             tenxer_mode: false,
             typing_mode: TypingMode::VimKeys,
+            preload_neighbor_previews: false,
             ..non_default_preferences()
         }
     );
@@ -470,6 +472,7 @@ fn every_saved_preference_loads_before_any_settings_page_exists() {
             assert_eq!(manager.preview_volume(), 0.35);
             assert!(manager.preview_text_wrap());
             assert!(manager.preview_autoplay());
+            assert!(manager.preload_neighbor_previews());
             assert_eq!(manager.auto_refresh_interval(), 600);
             assert_eq!(manager.thumbnail_workers(), 6);
             assert_eq!(
@@ -611,6 +614,7 @@ fn all_preference_setters_publish_and_persist_without_duplicate_notifications() 
                 |m| m.set_preview_volume(0.8),
                 |m| m.set_preview_text_wrap(false),
                 |m| m.set_preview_autoplay(false),
+                |m| m.set_preload_neighbor_previews(false),
                 |m| m.set_auto_refresh_interval(60),
                 |m| m.set_thumbnail_workers(3),
                 |m| m.set_icons_thumbnail_size(96),
