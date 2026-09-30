@@ -14,6 +14,8 @@ const MEDIA_PREVIEW: super::ParseOperation =
     super::ParseOperation::PreviewMedia(MediaPreviewSize {
         width: 640,
         height: 800,
+        expanded: false,
+        max_fps: 30,
     });
 const PDF_PREVIEW: super::ParseOperation = super::ParseOperation::PreviewPdf(PdfRenderSize {
     width: 640,
@@ -387,7 +389,27 @@ fn media_previews_use_bounded_streaming_instead_of_driver_wide_resource_limits()
     assert!(!joined.contains("MALLOC_ARENA_MAX"));
     assert!(joined.contains("--size 536870912 --tmpfs /tmp"));
     assert!(!joined.contains("--bind /tmp/private-output /output"));
-    assert!(joined.contains("preview-media /input.mkv /dev/stdout"));
+    assert!(joined.contains("preview-media /input.mkv /dev/stdout 640x800 "));
+
+    let expanded = sandbox_command(
+        Path::new("/usr/bin/bwrap"),
+        Path::new("/tmp/strata"),
+        Path::new("/home/alice/Videos/untrusted.mkv"),
+        Path::new("/tmp/private-output"),
+        ParseOperation::PreviewMedia(MediaPreviewSize::expanded(2600, 1600)),
+        0,
+        MediaPreviewBackend::Automatic,
+        &[],
+    );
+    let joined = expanded
+        .get_args()
+        .map(|argument| argument.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        joined.contains("preview-media /input.mkv /dev/stdout 2600x1600:e@60 "),
+        "the expanded size is not clamped to the drawer's: {joined}"
+    );
 }
 
 #[test]

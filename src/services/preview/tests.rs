@@ -33,6 +33,23 @@ fn media_viewport_sizes_follow_display_scale_without_exceeding_the_pixel_budget(
 }
 
 #[test]
+fn expanded_media_sizes_follow_the_display_up_to_a_ceiling_the_drawer_never_reaches() {
+    let shown = MediaPreviewSize::for_expanded_viewport(1300, 800, 2);
+    assert_eq!((shown.width, shown.height), (2600, 1600));
+    assert!(shown.expanded);
+    assert_ne!(shown, MediaPreviewSize::for_viewport(1300, 800, 2));
+
+    let huge = MediaPreviewSize::for_expanded_viewport(i32::MAX, i32::MAX, 2);
+    assert!(huge.width <= MediaPreviewSize::MAX_EXPANDED_EDGE);
+    assert!(huge.height <= MediaPreviewSize::MAX_EXPANDED_EDGE);
+    assert!(i64::from(huge.width) * i64::from(huge.height) <= 3840 * 2400);
+
+    for size in [shown, huge, MediaPreviewSize::new(640, 800)] {
+        assert_eq!(size.normalized(), size, "crossing the wire changes nothing");
+    }
+}
+
+#[test]
 fn recognizes_image_paths_for_metadata_probes() {
     assert!(is_image_path(std::path::Path::new("photo.PNG")));
     assert!(!is_image_path(std::path::Path::new("notes.txt")));
