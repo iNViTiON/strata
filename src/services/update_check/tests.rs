@@ -157,7 +157,7 @@ fn release_metadata_carries_channel_identity_fields() {
     assert!(metadata.commit.is_none());
     assert_eq!(
         metadata.url,
-        "https://github.com/lgse/strata/releases/tag/v0.5.0-rc.1"
+        "https://github.com/iNViTiON/strata/releases/tag/v0.5.0-rc.1"
     );
 }
 
@@ -207,7 +207,7 @@ fn other_api_failures_include_the_status() {
 fn release_page_url_uses_the_exact_published_tag() {
     assert_eq!(
         release_page_url("v1.2.3"),
-        "https://github.com/lgse/strata/releases/tag/v1.2.3"
+        "https://github.com/iNViTiON/strata/releases/tag/v1.2.3"
     );
 }
 

@@ -1256,8 +1256,10 @@ fn release_notes_card(title: &str, initial: &str) -> ReleaseNotesCard {
     badge.set_visible(false);
     let notes = gtk::Box::new(gtk::Orientation::Vertical, 6);
     set_release_notes_message(&notes, initial);
-    let fallback =
-        gtk::LinkButton::with_label("https://github.com/lgse/strata/releases", "View on GitHub");
+    let fallback = gtk::LinkButton::with_label(
+        "https://github.com/iNViTiON/strata/releases",
+        "View on GitHub",
+    );
     fallback.add_css_class("release-notes-fallback");
     fallback.set_halign(gtk::Align::Start);
     fallback.set_visible(false);
@@ -1693,7 +1695,7 @@ fn update_check_row(
                         title.set_text("Couldn’t check for updates");
                         crate::assets::set_primary_icon(&status_icon, icons::TRIANGLE_ALERT);
                         status.set_markup(
-                            "Couldn't check for updates · <a href=\"https://github.com/lgse/strata/releases/latest\">View releases on GitHub</a>",
+                            "Couldn't check for updates · <a href=\"https://github.com/iNViTiON/strata/releases/latest\">View releases on GitHub</a>",
                         );
                         available_notes.container.set_visible(false);
                         button.set_sensitive(true);
@@ -2521,7 +2523,7 @@ fn update_check_message(result: &UpdateCheck, update_method: UpdateMethod) -> St
             )
         }
         UpdateCheck::Failed(message) => format!(
-            "Couldn't check for updates: {} · <a href=\"https://github.com/lgse/strata/releases/latest\">View releases on GitHub</a>",
+            "Couldn't check for updates: {} · <a href=\"https://github.com/iNViTiON/strata/releases/latest\">View releases on GitHub</a>",
             glib::markup_escape_text(message)
         ),
     }
