@@ -4,3 +4,5 @@ base/preview-seams
 feat/jump-to-name
 feat/preload-neighbor-previews
 feat/expanded-preview
+# Fork-only distribution glue (updater and install.sh point at this fork); keep last.
+fork/distribution

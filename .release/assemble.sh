@@ -253,15 +253,24 @@ if $publish; then
   n=1
   while git rev-parse --verify --quiet "refs/tags/$tag_prefix$day-$n" > /dev/null; do n=$((n + 1)); done
   tag="$tag_prefix$day-$n"
-  say "Publishing $release as $tag"
+  # The in-app updater and install.sh only understand upstream's version tags,
+  # so each release also gets the next nightly version of the Cargo core.
+  core="$(git show HEAD:Cargo.toml | sed -nE 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' | head -n 1)"
+  version_tags="$(git ls-remote --tags --refs "$remote" 'v*' | sed 's#.*refs/tags/##')"
+  version="$(python3 scripts/release_version.py --current-version "$core" --bump patch \
+    --mode nightly --date "$day" --tags "$version_tags")"
+  version_tag="v$version"
+  say "Publishing $release as $tag and $version_tag"
   git tag -a "$tag" -m "Fork release $tag" -m "$manifest"
+  git tag -a "$version_tag" -m "Fork release $tag" -m "$manifest"
   if ! git push --atomic "--force-with-lease=refs/heads/$release:$published" \
-    "$remote" "refs/heads/$release:refs/heads/$release" "refs/tags/$tag"; then
-    git tag -d "$tag" > /dev/null
+    "$remote" "refs/heads/$release:refs/heads/$release" "refs/tags/$tag" "refs/tags/$version_tag"; then
+    git tag -d "$tag" "$version_tag" > /dev/null
     echo "error: push refused; $remote/$release moved since the fetch" >&2
     exit 4
   fi
   output "tag=$tag"
+  output "version_tag=$version_tag"
 fi
 
 say "Done: $release is $(git rev-parse --short HEAD)"
