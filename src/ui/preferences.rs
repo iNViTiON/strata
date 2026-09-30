@@ -286,8 +286,9 @@ fn default_enabled() -> bool {
     true
 }
 
+// The fork publishes only nightly builds.
 fn default_release_channel() -> String {
-    "stable".to_owned()
+    "nightly".to_owned()
 }
 
 fn default_browser_mode() -> String {
