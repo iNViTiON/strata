@@ -63,6 +63,7 @@ pub(in crate::ui) fn non_default_preferences() -> Preferences {
         preview_volume: 0.35,
         preview_text_wrap: true,
         preview_autoplay: true,
+        preload_neighbor_previews: true,
         auto_refresh_interval: 600,
         thumbnail_workers: 6,
         icons_thumbnail_size: 128,
