@@ -14,7 +14,7 @@ use std::{
 #[cfg(any(test, feature = "rar"))]
 use std::process::Command;
 
-use crate::services::{ModelPreviewStage, model_preview::MAX_MODEL_INPUT_BYTES};
+use crate::services::{ModelPreviewStage, PreviewPriority, model_preview::MAX_MODEL_INPUT_BYTES};
 
 #[cfg(feature = "rar")]
 pub mod archive;
@@ -98,6 +98,7 @@ pub struct ParseRequest<'a> {
     pub value: i32,
     pub media_backend: MediaPreviewBackend,
     pub cancellation: &'a Cancellation,
+    pub priority: PreviewPriority,
 }
 
 pub fn parse(
@@ -113,8 +114,29 @@ pub fn parse(
         value,
         media_backend,
         cancellation,
+        priority: PreviewPriority::Current,
     };
     parse_with_progress(request, &|_| {})
+}
+
+/// Renders for a neighboring entry: same sandbox, but every shared limit
+/// serves interactive requests first.
+pub fn parse_neighbor(
+    input: &Path,
+    operation: ParseOperation,
+    value: i32,
+    media_backend: MediaPreviewBackend,
+    cancellation: &Cancellation,
+) -> Result<ParseOutput, String> {
+    let request = ParseRequest {
+        input,
+        operation,
+        value,
+        media_backend,
+        cancellation,
+        priority: PreviewPriority::Neighbor,
+    };
+    parse_sandboxed(request, &|_| {})
 }
 
 pub fn parse_with_progress(
@@ -408,8 +430,14 @@ fn parse_canonical(
         ..
     } = request;
     check_input(input, operation)?;
-    if let Some(result) = browser::preview(input, operation, cancellation) {
+    if let Some(result) = browser::preview(input, operation, cancellation, request.priority) {
         return result.map(browser_output);
+    }
+    // Without persistent workers there is no pool budget to keep neighbors within.
+    if request.priority == PreviewPriority::Neighbor
+        && matches!(operation, ParseOperation::PreviewImage)
+    {
+        return Err("Neighbor previews need persistent sandbox workers".to_owned());
     }
     let output = Arc::new(
         PrivateOutput::create().map_err(|error| crate::error_text::io_error_message(&error))?,

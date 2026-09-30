@@ -418,6 +418,8 @@ impl PreviewState {
             media.pause();
         }
         self.hide_panel();
+        // A hidden preview must not keep decoders parked for files nobody sees.
+        self.preload.clear();
     }
 
     pub(super) fn opening_width(&self, available: i32) -> i32 {
