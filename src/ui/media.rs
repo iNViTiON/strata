@@ -19,12 +19,17 @@ mod audio;
 mod diagnostics;
 use audio::PcmOutput;
 
+/// See [`audio::prewarm`].
+pub(super) fn prewarm_audio() {
+    audio::prewarm();
+}
+
 const PAUSED_IDLE: Duration = Duration::from_secs(30);
 const RESIZE_DELAY: Duration = Duration::from_millis(250);
 const PRESENTATION_QUEUE: usize = 3;
 
 #[cfg(test)]
-type TestLoader = std::rc::Rc<dyn Fn(SandboxedMedia, u32) -> Result<Session, String>>;
+pub(crate) type TestLoader = std::rc::Rc<dyn Fn(SandboxedMedia, u32) -> Result<Session, String>>;
 
 mod imp {
     use super::*;
@@ -47,6 +52,8 @@ mod imp {
         pub(super) resized: Cell<Option<Instant>>,
         pub(super) paused: Cell<Option<Instant>>,
         pub(super) dormant: Cell<bool>,
+        pub(super) parked: Cell<bool>,
+        pub(super) parked_samples: RefCell<Option<Vec<u8>>>,
         pub(super) first_frame: Cell<bool>,
         pub(super) clock: Cell<Option<Instant>>,
         pub(super) clock_base: Cell<u64>,
@@ -71,7 +78,7 @@ mod imp {
 
     impl MediaStreamImpl for DecodedMedia {
         fn play(&self) -> bool {
-            if self.closed.get() {
+            if self.closed.get() || self.parked.get() {
                 return false;
             }
             let obj = self.obj();
@@ -166,6 +173,82 @@ impl DecodedMedia {
         obj
     }
 
+    /// A stream for a neighboring file. It decodes as far as its first frame,
+    /// then waits, paused and silent, until `promote` makes it a normal player.
+    pub fn preload(source: SandboxedMedia) -> Self {
+        let obj: Self = glib::Object::new();
+        obj.imp().source.replace(Some(source));
+        obj.restart_at(0);
+        obj.imp().parked.set(true);
+        obj.ensure_timer();
+        obj
+    }
+
+    #[cfg(test)]
+    pub(crate) fn use_test_loader(&self, loader: TestLoader) {
+        self.imp().loader.replace(Some(loader));
+    }
+
+    /// Whether this stream decodes exactly `source`, size included.
+    pub fn decodes(&self, source: &SandboxedMedia) -> bool {
+        self.imp().source.borrow().as_ref() == Some(source)
+    }
+
+    /// The first frame is on screen and the worker is waiting to be promoted.
+    pub fn is_parked_ready(&self) -> bool {
+        let imp = self.imp();
+        imp.parked.get() && imp.first_frame.get() && !imp.closed.get() && self.error().is_none()
+    }
+
+    /// Hands a parked stream to a player without restarting its decoder.
+    /// `false`: every interactive worker slot is taken, and the stream stays parked.
+    pub fn promote(&self) -> bool {
+        let imp = self.imp();
+        if !imp.parked.get() {
+            return true;
+        }
+        if imp.closed.get() || self.error().is_some() {
+            return false;
+        }
+        if !imp.session.borrow().as_ref().is_some_and(Session::promote) {
+            return false;
+        }
+        imp.parked.set(false);
+        // A header seen while parked left the audio output for now; without one,
+        // the ordinary startup path opens it.
+        if let Some(header) = imp.header.get()
+            && header.audio
+            && imp.audio.borrow().is_none()
+        {
+            let samples = imp.parked_samples.take().unwrap_or_default();
+            match self.open_audio(header, samples) {
+                Ok(audio) => {
+                    imp.audio.replace(Some(audio));
+                }
+                Err(error) => {
+                    self.fail(&error);
+                    return false;
+                }
+            }
+        }
+        imp.parked_samples.take();
+        // The idle clock must not count the time spent parked.
+        imp.paused.set(Some(Instant::now()));
+        self.ensure_timer();
+        true
+    }
+
+    fn open_audio(&self, header: Header, mut samples: Vec<u8>) -> Result<PcmOutput, String> {
+        let audio = PcmOutput::new(self.is_muted(), self.volume())?;
+        let left = (header.duration_us - media::timestamp(header.start_tick)) * media::SAMPLE_RATE
+            / 1_000_000;
+        samples.truncate(left.min(media::AUDIO_BYTES as u64 / 4) as usize * 4);
+        if !samples.is_empty() {
+            audio.push(samples, 0)?;
+        }
+        Ok(audio)
+    }
+
     fn ensure_timer(&self) {
         if self.imp().timer.borrow().is_some() || self.imp().closed.get() {
             return;
@@ -180,7 +263,11 @@ impl DecodedMedia {
             {
                 obj.fail(&error);
             }
-            if obj.imp().closed.get() || obj.imp().dormant.get() || obj.error().is_some() {
+            if obj.imp().closed.get()
+                || obj.imp().dormant.get()
+                || obj.error().is_some()
+                || (obj.imp().parked.get() && obj.imp().first_frame.get())
+            {
                 obj.imp().timer.borrow_mut().take();
                 glib::ControlFlow::Break
             } else {
@@ -341,13 +428,20 @@ impl DecodedMedia {
                 .cloned()
                 .ok_or("Preview closed")?;
             let size = source.size;
+            let start = |source: SandboxedMedia| {
+                if imp.parked.get() {
+                    Session::start_preload(source, tick)
+                } else {
+                    Session::start(source, tick)
+                }
+            };
             #[cfg(test)]
             let started = match imp.loader.borrow().as_ref() {
                 Some(loader) => loader(source, tick),
-                None => Session::start(source, tick),
+                None => start(source),
             };
             #[cfg(not(test))]
-            let started = Session::start(source, tick);
+            let started = start(source);
             match started {
                 Ok(session) => {
                     imp.session.replace(Some(session));
@@ -378,8 +472,7 @@ impl DecodedMedia {
             let event = imp.session.borrow().as_ref().and_then(Session::receive);
             match event {
                 Some(Event::Prepared(header)) => {
-                    let audio = header
-                        .audio
+                    let audio = (header.audio && !imp.parked.get())
                         .then(|| PcmOutput::new(self.is_muted(), self.volume()))
                         .transpose()?;
                     imp.audio.replace(audio);
@@ -403,7 +496,12 @@ impl DecodedMedia {
                         );
                     }
                 }
-                Some(Event::Packet(Packet::Frame(frame))) => self.accept_frame(frame)?,
+                Some(Event::Packet(Packet::Frame(frame))) => {
+                    self.accept_frame(frame)?;
+                    if imp.parked.get() {
+                        break;
+                    }
+                }
                 Some(Event::Packet(Packet::End(duration))) => {
                     imp.end.set(Some(duration));
                     if let Some(audio) = imp.audio.borrow().as_ref() {
@@ -518,8 +616,13 @@ impl DecodedMedia {
                     audio.play()?;
                 }
             }
+            if imp.parked.get() {
+                imp.parked_samples
+                    .replace(Some(std::mem::take(&mut frame.samples)));
+            }
             self.present(frame);
             tracing::debug!(
+                parked = imp.parked.get(),
                 latency_ms,
                 position_us = media::timestamp(header.start_tick),
                 width = header.width,
@@ -584,3 +687,6 @@ impl DecodedMedia {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
