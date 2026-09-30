@@ -554,7 +554,7 @@ pub(super) fn type_to_search_query(
     {
         return None;
     }
-    if key == gtk::gdk::Key::slash {
+    if key == gtk::gdk::Key::slash && !modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK) {
         return Some(TypeToSearchQuery::Empty);
     }
     key.to_unicode()
