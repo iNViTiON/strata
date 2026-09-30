@@ -1,0 +1,130 @@
+name: Assemble fork release
+
+# Rebuilds `release` = nix-dev + the branches in .release/branches (see NIX.md).
+# A `push` trigger on the feature branches cannot work: GitHub reads push
+# triggers from the pushed branch's own copy of this file, and feature branches
+# come from main, which never contains it. The schedule picks their pushes up.
+on:
+  workflow_run:
+    workflows: [Sync upstream]
+    types: [completed]
+  schedule:
+    - cron: "47 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even when the published manifest already matches
+        type: boolean
+        default: false
+
+concurrency:
+  group: assemble-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  DEV_BRANCH: nix-dev
+  RELEASE_BRANCH: release
+  ISSUE_LABEL: release-failed
+
+jobs:
+  assemble:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      # GITHUB_TOKEN cannot push commits that touch .github/workflows.
+      - name: Check out the fork with the sync token
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SYNC_PAT }}
+          ref: ${{ env.DEV_BRANCH }}
+          fetch-depth: 0
+
+      - name: Free disk space for the Nix store and the quality image
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Assemble, check and publish
+        id: assemble
+        env:
+          FORCE: ${{ inputs.force }}
+          # The dev shell's rootless podman needs host setup the runner lacks.
+          STRATA_CONTAINER_ENGINE: docker
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --detach
+          args=(--source origin --checks ci --publish)
+          [[ "$FORCE" == true ]] || args+=(--if-changed)
+          set +e
+          nix develop -c .release/assemble.sh "${args[@]}" 2>&1 | tee assemble.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Report the failed release in an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.assemble.outputs.status }}
+          BRANCH: ${{ steps.assemble.outputs.conflict_branch }}
+          FILES: ${{ steps.assemble.outputs.conflict_files }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh label create "$ISSUE_LABEL" --color B60205 --description "Fork release assembly needs manual help" --force
+          case "$STATUS" in
+            2) summary="Merging \`$BRANCH\` conflicts in:
+          \`\`\`
+          $FILES
+          \`\`\`
+          Resolve it once locally; rerere records it, and publishing the rebuilt release lets this workflow replay it:
+          \`\`\`bash
+          cd <release worktree>
+          mise run release -- --source origin      # stops at the conflict
+          # fix the files, git add, git commit --no-edit
+          mise run release -- --source origin --checks local --publish
+          \`\`\`" ;;
+            3) summary="The assembled release failed its checks. See the run log." ;;
+            4) summary="Publishing was refused (\`$RELEASE_BRANCH\` moved during the run, or a branch is missing)." ;;
+            *) summary="Assembly failed before or outside the merge (exit \`${STATUS:-unknown}\`). A listed branch may be missing on origin." ;;
+          esac
+          log="$(tail -n 60 assemble.log 2> /dev/null || true)"
+          body="$summary
+
+          \`$RELEASE_BRANCH\` was left untouched.
+
+          <details><summary>Last lines of the log</summary>
+
+          \`\`\`
+          $log
+          \`\`\`
+          </details>
+
+          Run: $RUN_URL"
+          existing="$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            gh issue edit "$existing" --body "$body"
+            gh issue comment "$existing" --body "Release assembly failed again: $RUN_URL"
+          else
+            gh issue create --title "Fork release assembly failed" --label "$ISSUE_LABEL" --body "$body"
+          fi
+
+      - name: Close resolved release issues
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for number in $(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[].number'); do
+            gh issue close "$number" --comment "Release assembled: $RUN_URL"
+          done
