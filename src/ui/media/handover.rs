@@ -4,10 +4,11 @@
 //!
 //! A second decoder starts at the new size a little ahead of the playhead and
 //! decodes in the background while the first keeps playing. Once the second
-//! has reached the frame right after the last one the first delivered, the
+//! has reached the moment right after the last frame the first delivered, the
 //! stream switches over: earlier frames and their audio came from the first
 //! decoder, later ones from the second, and the audio output and playback clock
-//! carry on unchanged.
+//! carry on unchanged. The two may run at different frame rates; both start
+//! and switch on whole ticks of the 30 fps seek grid, where their ticks meet.
 
 use std::time::{Duration, Instant};
 
@@ -74,7 +75,7 @@ impl DecodedMedia {
             .clamp(MIN_LEAD, MAX_LEAD);
         let playhead = media::seek_tick(imp.position.get(), header.duration_us);
         let start = playhead + (lead.as_secs_f64() * f64::from(media::FPS)).round() as u32;
-        if start + MIN_TICKS_LEFT >= header.ticks() {
+        if start + MIN_TICKS_LEFT >= header.seek_ticks() {
             // Too close to the end to matter; the stream keeps its current size.
             return true;
         }
@@ -97,8 +98,10 @@ impl DecodedMedia {
                 }));
             }
             Err(error) => {
-                // No free worker: the current decode carries on at its old size.
+                // No free worker: the current decode carries on at its old size
+                // and the switch is tried again once one may have freed up.
                 tracing::debug!(error, "media handover could not start");
+                imp.resized.set(Some(Instant::now()));
             }
         }
         true
@@ -113,12 +116,12 @@ impl DecodedMedia {
         let Some(header) = handover.header else {
             return Ok(());
         };
-        // The seam frame still belongs to the first decoder, with its audio
-        // eased into the second decoder's.
-        self.accept_frame(seam)?;
         imp.session.replace(Some(handover.session));
         imp.header.set(Some(header));
         imp.loaded_size.set(Some(handover.size));
+        // The seam frame is the second decoder's first, with the start of its
+        // audio eased in from the first decoder's.
+        self.accept_frame(seam)?;
         tracing::debug!(
             width = header.width,
             height = header.height,
@@ -127,8 +130,8 @@ impl DecodedMedia {
         Ok(())
     }
 
-    /// The finished handover and the frame to end the first decoder's part
-    /// with, once both decoders are at the same tick.
+    /// The finished handover and the second decoder's first frame, once both
+    /// decoders are at the same moment.
     fn next_switch(&self) -> Result<Option<(Handover, Frame)>, String> {
         let imp = self.imp();
         let mut slot = imp.handover.borrow_mut();
@@ -143,13 +146,21 @@ impl DecodedMedia {
             slot.take();
             return Ok(None);
         }
-        let Some(last) = imp.last_tick.get() else {
+        let (Some(last), Some(current)) = (imp.last_tick.get(), imp.header.get()) else {
             return Ok(None);
         };
         let mut ready = None;
         loop {
             if let Some(frame) = handover.pending.take() {
-                match frame.tick.cmp(&(last + 1)) {
+                let Some(next) = handover.header else {
+                    handover.pending = Some(frame);
+                    break;
+                };
+                // Two ticks are the same moment when they are equal in whole
+                // ticks of the seek grid: scale each by the other decoder's rate.
+                let incoming = u64::from(frame.tick) * u64::from(current.fps / media::FPS);
+                let outgoing = u64::from(last + 1) * u64::from(next.fps / media::FPS);
+                match incoming.cmp(&outgoing) {
                     std::cmp::Ordering::Less => continue,
                     std::cmp::Ordering::Equal => {
                         ready = Some(frame);
@@ -174,19 +185,26 @@ impl DecodedMedia {
         let Some(incoming) = ready else {
             return Ok(None);
         };
-        // The first decoder has the same tick queued; wait a frame if it does not yet.
+        // The first decoder has the next tick queued; wait a frame if it does not yet.
         let outgoing = imp.session.borrow().as_ref().and_then(Session::receive);
-        let mut seam = match outgoing {
+        let outgoing = match outgoing {
             None => {
                 handover.pending = Some(incoming);
                 return Ok(None);
             }
-            Some(Event::Packet(Packet::Frame(frame))) if frame.tick == incoming.tick => frame,
+            Some(Event::Packet(Packet::Frame(frame))) if frame.tick == last + 1 => frame,
             Some(Event::Failed(error)) => return Err(error),
             Some(_) => return Err("Unexpected media event during a handover".to_owned()),
         };
-        if seam.samples.len() == incoming.samples.len() {
-            seam.samples = crossfade(&seam.samples, &incoming.samples);
+        let mut seam = incoming;
+        // A decoder's first record carries the whole audio lead, all but its last
+        // block already delivered by the first decoder.
+        let block = handover.header.map_or(0, Header::audio_bytes);
+        if block > 0 && seam.samples.len() > block {
+            seam.samples.drain(..seam.samples.len() - block);
+        }
+        if !outgoing.samples.is_empty() && !seam.samples.is_empty() {
+            seam.samples = crossfade(&outgoing.samples, &seam.samples);
         }
         Ok(slot.take().map(|handover| (handover, seam)))
     }
@@ -194,12 +212,15 @@ impl DecodedMedia {
 
 /// 16-bit stereo audio at 48 kHz, eased from `outgoing` to `incoming` over the
 /// first 10 ms. Decoders that start from a seek can land a few samples apart
-/// (Opus does), which a straight join turns into a click.
+/// (Opus does), which a straight join turns into a click. The chunks may differ
+/// in length when the decoders run at different frame rates.
 fn crossfade(outgoing: &[u8], incoming: &[u8]) -> Vec<u8> {
     const BYTES_PER_FRAME: usize = 4;
     const FADE_FRAMES: usize = (media::SAMPLE_RATE as usize) / 100;
     let mut mixed = incoming.to_vec();
-    let fade = FADE_FRAMES.min(mixed.len() / BYTES_PER_FRAME);
+    let fade = FADE_FRAMES
+        .min(mixed.len() / BYTES_PER_FRAME)
+        .min(outgoing.len() / BYTES_PER_FRAME);
     for frame in 0..fade {
         let weight = frame as f32 / fade as f32;
         for byte in (frame * BYTES_PER_FRAME..(frame + 1) * BYTES_PER_FRAME).step_by(2) {

@@ -153,9 +153,11 @@ new width.
 
 Expanding also sharpens the content in place, without touching zoom, scroll or play state: images are
 re-rendered up to 2,880 pixels on the longest edge, PDF pages up to 2,400 pixels wide, and a playing
-video's decoder switches to the larger size in the background without pausing. Video decoding is capped at
-1,280 pixels on the longest edge, so on a larger display the video is scaled up and looks softer than a
-still image; this is a known limit.
+video's decoder switches to the larger size in the background without pausing. The decode follows the
+size of the expanded view, including when the window is resized, up to the screen's size (at most 3,840 pixels
+on the longest edge) and never beyond the video's own size; the small preview stays at 1,280. A video above
+30 fps plays at 60 fps in the expanded view when the screen refreshes at least that fast, unless its frames are
+larger than 2560 x 1440, which keep their resolution at 30 fps.
 
 **F1**, **Ctrl+K** and the other window commands keep working over the overlay. The fullscreen window
 takes the keys above, but the main window's other commands (including text size) are unavailable while it is open.

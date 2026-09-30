@@ -122,6 +122,11 @@ impl PcmOutput {
         Ok(output)
     }
 
+    /// Samples taken so far: the position the next chunk's timestamp must match.
+    pub(super) fn pushed_frames(&self) -> u64 {
+        self.frames.get()
+    }
+
     pub(super) fn push(&self, data: Vec<u8>, timestamp_us: u64) -> Result<(), String> {
         if data.is_empty()
             || data.len() > MAX_CHUNK_BYTES

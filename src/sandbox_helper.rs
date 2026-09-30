@@ -922,6 +922,19 @@ fn media_preview_size(value: &str) -> Result<MediaPreviewSize, String> {
     if value == "0" {
         return Ok(MediaPreviewSize::new(1280, 1280));
     }
+    let (value, expanded) = match value.split_once(":e") {
+        Some((size, rate)) => {
+            let fps = match rate.strip_prefix('@') {
+                None if rate.is_empty() => 30,
+                Some(fps) => fps
+                    .parse::<u32>()
+                    .map_err(|_| "Invalid media preview frame rate".to_owned())?,
+                None => return Err("Invalid media preview dimensions".to_owned()),
+            };
+            (size, Some(fps))
+        }
+        None => (value, None),
+    };
     let (width, height) = value
         .split_once('x')
         .ok_or_else(|| "Invalid media preview dimensions".to_owned())?;
@@ -930,7 +943,14 @@ fn media_preview_size(value: &str) -> Result<MediaPreviewSize, String> {
             .parse::<i32>()
             .map_err(|_| "Invalid media preview dimensions".to_owned())
     };
-    Ok(MediaPreviewSize::new(parse(width)?, parse(height)?))
+    let (width, height) = (parse(width)?, parse(height)?);
+    Ok(match expanded {
+        Some(fps) => MediaPreviewSize {
+            max_fps: if fps >= 60 { 60 } else { 30 },
+            ..MediaPreviewSize::expanded(width, height)
+        },
+        None => MediaPreviewSize::new(width, height),
+    })
 }
 
 fn bounded_output_with_timeout(

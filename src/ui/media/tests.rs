@@ -15,6 +15,8 @@ fn test_header(start_tick: u32) -> Header {
         audio: false,
         duration_us: TEST_DURATION_US,
         start_tick,
+        fps: 30,
+        native_fps: 30,
     }
 }
 
@@ -558,21 +560,33 @@ fn source(width: i32, height: i32) -> SandboxedMedia {
 }
 
 /// Fake decoders sized like the request. `offset` shifts where the second
-/// and later decoders start, and `busy_after` makes later starts fail.
-fn loader(loads: &Rc<Cell<usize>>, offset: u32, busy_after: Option<usize>) -> TestLoader {
+/// and later decoders start, and starts numbered in `busy` fail.
+fn loader(
+    loads: &Rc<Cell<usize>>,
+    offset: u32,
+    busy: Option<std::ops::Range<usize>>,
+) -> TestLoader {
     let loads = loads.clone();
     Rc::new(move |source: SandboxedMedia, tick| {
         let count = loads.get();
         loads.set(count + 1);
-        if busy_after.is_some_and(|limit| count >= limit) {
+        if busy.as_ref().is_some_and(|busy| busy.contains(&count)) {
             return Err("Media previews are busy".to_owned());
         }
+        let (width, height) = (source.size.width as u32, source.size.height as u32);
+        let fps = if source.size.expanded {
+            media::frame_rate_for(width, height, 60, source.size.max_fps)
+        } else {
+            media::FPS
+        };
         stream(Header {
-            width: source.size.width as u32,
-            height: source.size.height as u32,
+            width,
+            height,
             audio: false,
             duration_us: DURATION_US,
-            start_tick: if count == 0 { tick } else { tick + offset },
+            start_tick: (if count == 0 { tick } else { tick + offset }) * (fps / media::FPS),
+            fps,
+            native_fps: 60,
         })
     })
 }
@@ -598,12 +612,16 @@ fn picture_size(media: &DecodedMedia) -> (i32, i32) {
     (media.intrinsic_width(), media.intrinsic_height())
 }
 
-fn playing(loads: &Rc<Cell<usize>>, offset: u32, busy_after: Option<usize>) -> DecodedMedia {
+fn playing(
+    loads: &Rc<Cell<usize>>,
+    offset: u32,
+    busy: Option<std::ops::Range<usize>>,
+) -> DecodedMedia {
     let media = DecodedMedia::new(source(320, 180));
     media
         .imp()
         .loader
-        .replace(Some(loader(loads, offset, busy_after)));
+        .replace(Some(loader(loads, offset, busy)));
     media.play();
     spin_until("first frames", || {
         picture_size(&media) == (320, 180) && media.timestamp() > 300_000
@@ -642,14 +660,14 @@ fn a_playing_stream_changes_size_without_stopping_or_going_back() {
             assert!(!media.is_ended());
             let imp = media.imp();
             assert!(imp.handover.borrow().is_none());
-            assert_eq!(imp.origin_tick.get(), 0, "the timeline keeps its origin");
+            assert_eq!(imp.origin_us.get(), 0, "the timeline keeps its origin");
             let handed_over_at = imp.header.get().expect("header").start_tick;
             assert!(
                 handed_over_at > 0,
                 "the second decoder started ahead of the playhead"
             );
             assert_eq!(
-                media.audio_timestamp(handed_over_at + 3),
+                media.audio_timestamp(handed_over_at + 3, 30),
                 media::timestamp(handed_over_at + 3),
                 "audio after the switch continues the same timeline"
             );
@@ -657,6 +675,80 @@ fn a_playing_stream_changes_size_without_stopping_or_going_back() {
             let after = media.timestamp();
             spin_until("playback continues", || media.timestamp() > after + 100_000);
             assert_eq!(loads.get(), 2, "no restart");
+        },
+    );
+}
+
+#[test]
+fn a_faster_decoder_takes_over_on_the_seek_grid_and_hands_back() {
+    crate::test_support::gtk_test(
+        "ui::media::tests::a_faster_decoder_takes_over_on_the_seek_grid_and_hands_back",
+        || {
+            let loads = Rc::new(Cell::new(0));
+            let media = playing(&loads, 0, None);
+            assert_eq!(media.imp().header.get().expect("header").fps, 30);
+
+            media.resize(MediaPreviewSize::expanded(640, 360));
+            let mut previous = media.timestamp();
+            spin_until("handover to 60 fps", || {
+                let now = media.timestamp();
+                assert!(now >= previous, "the playhead never moves back");
+                previous = now;
+                media
+                    .imp()
+                    .header
+                    .get()
+                    .is_some_and(|header| header.fps == 60)
+                    && picture_size(&media) == (640, 360)
+            });
+            let header = media.imp().header.get().expect("header");
+            assert_eq!(
+                loads.get(),
+                2,
+                "one decoder to start with, one to hand over to"
+            );
+            assert!(header.start_tick > 0 && header.start_tick.is_multiple_of(2));
+            assert_eq!(
+                media.imp().origin_us.get(),
+                0,
+                "the timeline keeps its origin"
+            );
+            assert_eq!(
+                media.audio_timestamp(header.start_tick + 3, 60),
+                media::timestamp_at(header.start_tick + 3, 60),
+                "audio after the switch continues the same timeline"
+            );
+            assert!(media.is_playing());
+            assert!(media.error().is_none());
+
+            let after = media.timestamp();
+            spin_until("playback continues", || media.timestamp() > after + 100_000);
+            media.resize(MediaPreviewSize::new(320, 180));
+            spin_until("handover back to 30 fps", || {
+                media
+                    .imp()
+                    .header
+                    .get()
+                    .is_some_and(|header| header.fps == 30)
+                    && picture_size(&media) == (320, 180)
+            });
+            assert_eq!(loads.get(), 3);
+            assert!(media.is_playing());
+            assert!(media.error().is_none());
+        },
+    );
+}
+
+#[test]
+fn a_slow_screen_keeps_the_expanded_view_at_thirty_frames() {
+    crate::test_support::gtk_test(
+        "ui::media::tests::a_slow_screen_keeps_the_expanded_view_at_thirty_frames",
+        || {
+            let loads = Rc::new(Cell::new(0));
+            let media = playing(&loads, 0, None);
+            media.resize(MediaPreviewSize::expanded(640, 360).for_refresh_rate(30_000));
+            spin_until("handover", || picture_size(&media) == (640, 360));
+            assert_eq!(media.imp().header.get().expect("header").fps, 30);
         },
     );
 }
@@ -702,20 +794,30 @@ fn a_paused_stream_restarts_at_its_position_instead() {
 }
 
 #[test]
-fn a_busy_worker_pool_leaves_the_current_decode_playing() {
+fn a_handover_that_finds_no_free_worker_is_retried_while_the_stream_keeps_playing() {
     crate::test_support::gtk_test(
-        "ui::media::tests::a_busy_worker_pool_leaves_the_current_decode_playing",
+        "ui::media::tests::a_handover_that_finds_no_free_worker_is_retried_while_the_stream_keeps_playing",
         || {
             let loads = Rc::new(Cell::new(0));
-            let media = playing(&loads, 0, Some(1));
+            let media = playing(&loads, 0, Some(1..3));
             media.resize(MediaPreviewSize::new(640, 360));
-            spin_until("the handover was attempted", || loads.get() == 2);
+            spin_until("the first attempt fails", || loads.get() == 2);
             let before = media.timestamp();
-            spin_until("playback goes on", || media.timestamp() > before + 300_000);
-            assert_eq!(picture_size(&media), (320, 180), "the old size stays");
+            spin_until("playback goes on", || media.timestamp() > before + 100_000);
+            assert_eq!(
+                picture_size(&media),
+                (320, 180),
+                "the old size stays for now"
+            );
             assert!(media.is_playing());
             assert!(media.error().is_none());
-            assert_eq!(loads.get(), 2, "it does not retry in a loop");
+
+            spin_until("the retry hands over", || {
+                picture_size(&media) == (640, 360)
+            });
+            assert_eq!(loads.get(), 4, "two busy attempts, then one that worked");
+            assert!(media.is_playing());
+            assert!(media.error().is_none());
         },
     );
 }
