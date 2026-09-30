@@ -652,10 +652,13 @@ its parked workers until its preview is hidden or its selection moves.
   render that has already started is left to finish (cancelling would kill the
   pool supervisor and make the next render pay a cold start) and only fills the
   cache.
-- Work is keyed by file (location and modification time) and by the presentation
-  it was made for: the drawer's decode size, and the preview detail once the
-  expanded preview exists. A change of presentation drops the preloads and asks
-  for new ones; a parked worker is never resized in place.
+- Work is keyed by file (location and modification time) and, for images and PDF
+  pages, by the presentation it was made for: the drawer's decode size and the
+  preview detail. A change of presentation drops those preloads and asks for new
+  ones. Video neighbors are keyed by file only: they always decode at the drawer's
+  size and 30 fps, even while the preview is expanded. Selecting one promotes the
+  parked worker as it is, then the player asks for the size and rate now wanted
+  and the expanded view's handover switches to a matching decoder.
 - Selecting a ready neighbor skips the 75 ms focus debounce, unless selections are
   arriving less than 150 ms apart (key repeat).
 - Preloading is skipped while the preview cache holds more than 75 % of its byte

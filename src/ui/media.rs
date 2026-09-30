@@ -320,13 +320,26 @@ impl DecodedMedia {
     }
 
     #[cfg(test)]
+    pub(crate) fn requested_size(&self) -> Option<MediaPreviewSize> {
+        self.imp()
+            .source
+            .borrow()
+            .as_ref()
+            .map(|source| source.size)
+    }
+
+    #[cfg(test)]
     pub(crate) fn use_test_loader(&self, loader: TestLoader) {
         self.imp().loader.replace(Some(loader));
     }
 
-    /// Whether this stream decodes exactly `source`, size included.
+    /// Whether this stream decodes `source`'s file, whatever size or rate it was asked for.
     pub fn decodes(&self, source: &SandboxedMedia) -> bool {
-        self.imp().source.borrow().as_ref() == Some(source)
+        self.imp().source.borrow().as_ref().is_some_and(|own| {
+            own.path == source.path
+                && own.backend == source.backend
+                && own.input_owner == source.input_owner
+        })
     }
 
     /// The first frame is on screen and the worker is waiting to be promoted.
