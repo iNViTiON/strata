@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Rebuild the fork's release branch (see Releases in NIX.md)"
+exec "$(git rev-parse --show-toplevel)/.release/assemble.sh" "$@"

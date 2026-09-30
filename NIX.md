@@ -1,8 +1,9 @@
 # Nix development environment (fork only)
 
-This file, `flake.nix`, `flake.lock`, `.envrc` and
-`.github/workflows/sync-upstream.yml` exist only on the fork's `nix-dev` branch.
-`main` mirrors `lgse/strata` exactly; never commit to it.
+This file, `flake.nix`, `flake.lock`, `.envrc`, `nix/`, `.release/`,
+`.mise/tasks/release` and the `sync-upstream.yml` and `assemble-release.yml`
+workflows exist only on the fork's `nix-dev` branch (and `release`, built from
+it). `main` mirrors `lgse/strata` exactly; never commit to it.
 
 ## Branches
 
@@ -10,6 +11,7 @@ This file, `flake.nix`, `flake.lock`, `.envrc` and
 | --- | --- |
 | `main` | Untouched mirror of upstream `main`, fast-forwarded by the sync workflow |
 | `nix-dev` | `main` plus this environment; stays checked out in the main checkout |
+| `release` | Generated: `nix-dev` plus the branches in `.release/branches`; never commit to it by hand |
 | feature branches | Created from `main` in worktrees under `.claude/worktrees/`, using this checkout's environment |
 
 ## Using the shell
@@ -143,3 +145,122 @@ git branch -f main origin/main
 
 Keep fork-only changes in new files where possible; the only upstream file
 touched is one `.gitignore` line (`/.direnv/`), which keeps rebases trivial.
+
+## Releases
+
+`release` is what the NixOS configuration installs. It is rebuilt from scratch,
+never edited: `nix-dev`, then each branch in `.release/branches` merged in
+order with `--no-ff`, then a commit recording `.release/manifest` (the SHAs of
+`nix-dev` and every merged branch). Every published build is tagged
+`fork-release-YYYYMMDD-N`, so a revision pinned in a `flake.lock` stays
+fetchable after `release` is force-pushed.
+
+### The package
+
+`nix build .#strata` (also `.#default`) builds this tree with the dev shell's
+Rust toolchain and `Cargo.lock`, so there is no `cargoHash` to maintain. It is
+based on Th1nkK1D's package (credit and MIT notice in `nix/package.nix`). The
+patches point the preview sandbox at the store instead of `/usr` in every
+`src/sandbox*` call site, pin `bwrap` and `prlimit`, give the helpers a store
+`PATH`, and bind `/run/opengl-driver` so VA-API works in the sandbox. Each
+uses `--replace-fail`, so an upstream change to those lines fails the build
+instead of silently dropping a patch. UnRAR is statically linked and unfree;
+the flake allows unfree for `strata` only.
+
+To install it from the NixOS configuration:
+
+```nix
+inputs.strata = {
+  url = "github:iNViTiON/strata/release";
+  inputs.nixpkgs.follows = "nixpkgs-unstable";
+};
+
+# in an overlay
+strata = inputs.strata.packages.${prev.stdenv.hostPlatform.system}.strata;
+```
+
+`nix flake update strata` then picks up the latest release. The VA-API bind is
+already in the package; do not add it again in an overlay.
+
+### Adding or removing a feature
+
+Edit `.release/branches` on `nix-dev` (order matters: a branch that builds on
+another comes after it), commit, and push `nix-dev`. Feature branches must be
+pushed to `origin` before they are listed: CI merges `origin/*` and fails
+rather than building a release without a listed branch. Branches built on
+`base/preview-seams` are rebased with it; keep that base first in the list.
+
+### Rebuilding locally
+
+Use a dedicated worktree; the script refuses to run in the `nix-dev` or `main`
+checkout because it switches branches:
+
+```bash
+git worktree add --detach .claude/worktrees/release
+cd .claude/worktrees/release
+direnv exec . mise run release                        # local branches, no checks
+direnv exec . mise run release -- --checks local      # + fmt, clippy, deny, typos, tests, nix build, e2e
+direnv exec . mise run release -- --source origin --checks local --publish
+```
+
+`--source local` (the default) merges local branches, which works before they
+are pushed. `--publish` requires `--source origin`, tags the result and pushes
+`release` and the tag with `--force-with-lease`. Set `RELEASE_MEMORY_MAX=16G`
+to run the heavy local checks inside a `systemd-run` memory cap.
+`.release/assemble.sh --help` lists every option and exit code.
+
+### Conflicts
+
+Before merging, the script enables `rerere` and trains it
+(`contrib/rerere-train.sh`) from the merges of the published `release` and the
+latest tags, so every conflict resolved in an earlier release is replayed. A
+merge is committed automatically only when `rerere` resolved every hunk. When
+it stops:
+
+1. Resolve the listed files. If the right result depends on what a feature is
+   meant to do, ask that branch's owner.
+2. `git add` them and `git commit --no-edit`; `rerere` records the resolution.
+3. Run the script again. It starts from `nix-dev`, discards the half-built
+   branch and replays the recorded resolution.
+4. Publish that rebuild. CI has no `rr-cache` of its own and learns the
+   resolution only from published release merges.
+
+A conflict that keeps returning belongs in the feature branch: rebase it and
+drop the resolution.
+
+### CI
+
+`.github/workflows/assemble-release.yml` ("Assemble fork release") runs after
+a successful "Sync upstream", every six hours, and on demand. It skips when
+the published manifest already matches, otherwise assembles from `origin/*`,
+runs upstream's pinned-container `scripts/quality.sh` plus `deny`, `typos`,
+the script tests and `nix build .#strata`, then tags and pushes with
+`SYNC_PAT` (`GITHUB_TOKEN` cannot push commits that touch workflows). On a
+conflict or failure it pushes nothing and opens or updates an issue labeled
+`release-failed`. A `push` trigger on feature branches cannot work: GitHub
+reads it from the pushed branch's copy of the workflow, and feature branches
+come from `main`; the schedule picks their pushes up instead.
+
+Upstream's publishing workflows cannot fire from `release` or its tags:
+`release.yml` is `workflow_dispatch` only, and `packaging.yml`,
+`publish-aur.yml`, `e2e-images.yml` and `ci.yml` trigger only on pushes to
+`main` or pull requests. None has a tag, `create` or `release` trigger.
+
+### Rolling back
+
+Point the NixOS input at a tag instead of the branch:
+
+```nix
+inputs.strata.url = "github:iNViTiON/strata/fork-release-20261001-1";
+```
+
+or rebuild with the old revision locked:
+`nix flake lock --override-input strata github:iNViTiON/strata/<tag>`. To move
+`release` itself back, push the tag over it:
+
+```bash
+git push --force-with-lease origin fork-release-20261001-1^{commit}:refs/heads/release
+```
+
+The next CI run rebuilds it from the current branches unless the manifest
+matches, so fix or delist the offending branch first.
