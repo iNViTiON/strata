@@ -1,0 +1,7 @@
+# Fork release manifest: nix-dev and the merged branches, in order.
+nix-dev bb3fcc10a2102e987314122a26c9ed8d1367b1bd
+base/preview-seams 3ddc820e23d9338174b5ea53dec65484bc0d6d93
+feat/jump-to-name b520f8594bceeb2958edf715704f98015a295713
+feat/preload-neighbor-previews f3a43697e391d793bf7e1231d95a8ed4509cba1f
+feat/expanded-preview edeef8960b883f28da13b5255bb244590b461fe1
+fork/distribution 5531b7f13205989896184baaea8a0e2635bf9e8b
