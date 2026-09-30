@@ -15,9 +15,18 @@ impl PreviewState {
         if self.current.borrow().as_ref() == Some(&entry) && self.current_request.get().is_some() {
             return;
         }
+        let rapid = self.preload.note_focus_change();
         // A suspended l stays pending until this file changes or the drawer closes.
         self.claim_on_resume.set(false);
         if !self.revealer.reveals_child() {
+            self.show(entry, depth);
+            return;
+        }
+        if !rapid
+            && self
+                .preload
+                .is_ready(&entry, self.media_preview_size(), self.current_detail())
+        {
             self.show(entry, depth);
             return;
         }

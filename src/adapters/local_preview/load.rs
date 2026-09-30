@@ -10,8 +10,9 @@ use std::{
 use gtk::{gio, glib, prelude::*};
 
 use super::{
-    PREVIEW_CACHE, PreviewCacheKey, pdf_render_size, remote, remote::StagedPreview,
-    request_heavy_preview_permit,
+    HeavyRank, MAX_PREVIEW_CACHE_BYTES, PREVIEW_CACHE, PreviewCacheKey, begin_neighbor_render,
+    join_neighbor_render, mark_neighbor_running, pdf_render_size, remote, remote::StagedPreview,
+    request_heavy_preview_permit, request_ranked_heavy_permit,
 };
 use crate::{
     adapters::{
@@ -108,6 +109,14 @@ impl RenderPlan {
     }
 }
 
+/// How a heavy render relates to a neighbor's render of the same page.
+enum NeighborLink {
+    Unshared,
+    Registered(super::NeighborRenderGuard),
+    /// An interactive request that waited for the neighbor's result and found it cached.
+    Cached,
+}
+
 pub(super) struct PreviewLoad {
     request: PreviewRequest,
     entry: FileEntry,
@@ -115,6 +124,7 @@ pub(super) struct PreviewLoad {
     backend: MediaPreviewBackend,
     cancellation: Cancellation,
     abort_safe: Rc<Cell<bool>>,
+    neighbor: bool,
     sample: Option<Vec<u8>>,
     content_type: String,
     content: PreviewContent,
@@ -161,6 +171,7 @@ impl PreviewLoad {
         backend: MediaPreviewBackend,
         cancellation: Cancellation,
         abort_safe: Rc<Cell<bool>>,
+        neighbor: bool,
     ) -> Self {
         Self {
             entry: request.entry.clone(),
@@ -169,6 +180,7 @@ impl PreviewLoad {
             backend,
             cancellation,
             abort_safe,
+            neighbor,
             sample: None,
             content_type: String::new(),
             content: PreviewContent::Unsupported,
@@ -213,6 +225,12 @@ impl PreviewLoad {
     }
 
     async fn load(&mut self, render: impl RenderFn) -> Step<()> {
+        if self.neighbor
+            && (self.entry.location.native_path().is_none()
+                || crate::services::preload_kind(&self.entry).is_none())
+        {
+            return Err(Stop::Silent);
+        }
         self.read_sample().await?;
         self.classify().await?;
         if let Some(format) = self.archive_format() {
@@ -616,15 +634,67 @@ impl PreviewLoad {
     async fn acquire_heavy_permit(
         &self,
         plan: &RenderPlan,
+        neighbor_cancel: &Cancellation,
+        cache_key: Option<&PreviewCacheKey>,
     ) -> Step<Option<super::HeavyPreviewPermit>> {
         if !plan.is_heavy() {
             return Ok(None);
         }
-        let Some(permit) = request_heavy_preview_permit().acquire().await else {
+        let rank = if self.neighbor {
+            HeavyRank::Neighbor
+        } else if matches!(plan.operation, ParseOperation::PreviewPdf(_))
+            && self.request.pdf_page > 0
+        {
+            HeavyRank::LaterPage
+        } else {
+            HeavyRank::Interactive
+        };
+        let Some(permit) = request_ranked_heavy_permit(rank).acquire().await else {
             return Err(Stop::Silent);
         };
-        self.check_cancelled()?;
+        if self.cancellation.is_cancelled() || neighbor_cancel.is_cancelled() {
+            return Err(Stop::Silent);
+        }
+        if self.neighbor
+            && let Some(key) = cache_key
+        {
+            mark_neighbor_running(key, neighbor_cancel);
+        }
         Ok(Some(permit))
+    }
+
+    /// A neighbor's heavy render is shared: the first one for a page runs it,
+    /// and an interactive request for the same page waits for that result.
+    async fn link_neighbor_render(
+        &mut self,
+        plan: &RenderPlan,
+        cache_key: Option<&PreviewCacheKey>,
+        neighbor_cancel: &Cancellation,
+    ) -> Step<NeighborLink> {
+        if !plan.is_heavy() {
+            return Ok(NeighborLink::Unshared);
+        }
+        let Some(key) = cache_key else {
+            return if self.neighbor {
+                Err(Stop::Silent)
+            } else {
+                Ok(NeighborLink::Unshared)
+            };
+        };
+        if self.neighbor {
+            return begin_neighbor_render(key, neighbor_cancel)
+                .map(NeighborLink::Registered)
+                .ok_or(Stop::Silent);
+        }
+        if let Some(joined) = join_neighbor_render(key) {
+            let _ = joined.await;
+            self.check_cancelled()?;
+            if let Some(cached) = PREVIEW_CACHE.with(|cache| cache.borrow_mut().get(key)) {
+                self.content = cached;
+                return Ok(NeighborLink::Cached);
+            }
+        }
+        Ok(NeighborLink::Unshared)
     }
 
     fn missing_gcode_thumbnail<E>(
@@ -707,10 +777,36 @@ impl PreviewLoad {
             return Ok(());
         }
         self.check_cancelled()?;
-        let heavy_permit = self.acquire_heavy_permit(&plan).await?;
-        self.abort_safe.set(heavy_permit.is_none());
+        // A neighbor must not evict the page being read from the cache.
+        if self.neighbor
+            && PREVIEW_CACHE
+                .with(|cache| cache.borrow().byte_count > MAX_PREVIEW_CACHE_BYTES / 4 * 3)
+        {
+            return Err(Stop::Silent);
+        }
+        let neighbor_cancel = Cancellation::default();
+        let neighbor_render = match self
+            .link_neighbor_render(&plan, cache_key.as_ref(), &neighbor_cancel)
+            .await?
+        {
+            NeighborLink::Cached => return Ok(()),
+            NeighborLink::Registered(guard) => Some(guard),
+            NeighborLink::Unshared => None,
+        };
+        let heavy = plan.is_heavy();
+        let heavy_permit = self
+            .acquire_heavy_permit(&plan, &neighbor_cancel, cache_key.as_ref())
+            .await?;
+        // Neighbor work that has begun runs to completion, unless interactive
+        // work preempts it, so its result still lands in the cache.
+        self.abort_safe
+            .set(heavy_permit.is_none() && !self.neighbor);
         let value = self.request.pdf_page;
-        let cancellation = self.cancellation.clone();
+        let cancellation = if self.neighbor && heavy {
+            neighbor_cancel.clone()
+        } else {
+            self.cancellation.clone()
+        };
         let backend = self.backend;
         let spawn_path = path.clone();
         let for_render = plan.operation.clone();
@@ -720,7 +816,14 @@ impl PreviewLoad {
         })
         .await;
         self.abort_safe.set(true);
-        self.check_cancelled()?;
+        let abandoned = match (self.neighbor, heavy) {
+            (true, true) => neighbor_cancel.is_cancelled(),
+            (true, false) => false,
+            (false, _) => self.cancellation.is_cancelled(),
+        };
+        if abandoned {
+            return Err(Stop::Silent);
+        }
         self.content = if self.missing_gcode_thumbnail(&rendered, &plan) {
             let (content, truncated) = self.read_text().await?;
             PreviewContent::Text { content, truncated }
@@ -733,6 +836,7 @@ impl PreviewLoad {
                 cache.borrow_mut().insert(cache_key, self.content.clone());
             });
         }
+        drop(neighbor_render);
         Ok(())
     }
 
