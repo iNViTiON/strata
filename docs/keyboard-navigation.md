@@ -115,7 +115,8 @@ reloads or restarts: a playing video keeps its position and play state, a docume
 image or PDF keeps its zoom. **Settings → General → Expanded preview → Expanded preview style** picks where
 it goes:
 
-- **Overlay** (default): a large layer over Strata's own window.
+- **Overlay** (default): a large layer over Strata's own window. The preview grows out of the drawer and
+  shrinks back into it, and switches instantly with **Reduce motion**.
 - **Fullscreen window**: a separate window opened fullscreen on the main window's monitor. Its opening
   and closing animation belongs to the compositor. Closing the window, or closing the main window, ends it.
 

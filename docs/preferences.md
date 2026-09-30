@@ -225,7 +225,8 @@ current folder and **s** always searches below it.
 ## Expanded preview
 
 **Settings → General → Expanded preview → Expanded preview style** chooses
-**Overlay** (default), a large layer over Strata's window, or **Fullscreen
+**Overlay** (default), a large layer over Strata's window that grows out of the
+drawer and shrinks back into it (instantly with **Reduce motion**), or **Fullscreen
 window**, a separate window opened fullscreen on the main window's monitor whose
 opening and closing animation belongs to the compositor. It is read when the preview is
 expanded; a preview that is already expanded keeps its style.
