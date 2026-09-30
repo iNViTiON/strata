@@ -81,6 +81,7 @@ impl Default for Preferences {
             watch_network_folders: true,
             expanded_preview_style: ExpandedPreviewStyle::default(),
             expanded_preview_shift_controls: true,
+            preload_neighbor_previews: false,
             thumbnail_workers: crate::sandbox::browser::default_worker_limit(),
             show_thumbnails: true,
             stl_thumbnails: false,

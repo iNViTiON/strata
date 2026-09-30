@@ -197,7 +197,12 @@ impl PreviewState {
             }
             PreviewEvent::Ready(preview) if preview.request_id == expected => {
                 self.cancel_loading();
+                // Neighbors wait for a playing video's first frame instead.
+                let media = matches!(preview.content, PreviewContent::SandboxedMedia { .. });
                 self.render(preview);
+                if !media {
+                    self.preload.schedule();
+                }
             }
             PreviewEvent::Failed {
                 request_id,
@@ -246,6 +251,7 @@ impl PreviewState {
             }
             self.current_request.set(None);
             self.show_failure(message, &detail);
+            self.preload.schedule();
         }
     }
 

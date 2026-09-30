@@ -42,6 +42,13 @@ impl PreviewDrawer {
             slot,
             resize_grip,
         });
+        state.preload.attach(Rc::downgrade(&state));
+        let weak = Rc::downgrade(&state);
+        state.on_presentation_changed(move || {
+            if let Some(state) = weak.upgrade() {
+                state.preload.schedule();
+            }
+        });
         connect_panel_action(&state);
         install_preview_drag(&header.handle, &state);
         state.install_keyboard_ownership();
@@ -64,6 +71,7 @@ impl PreviewDrawer {
             }
         });
         bind_text_wrap(&header.wrap, &state);
+        bind_preload(&state);
         let weak = Rc::downgrade(&state);
         super::super::theme::ThemeManager::shared().bind_theme_preference(
             &state.pane,
@@ -354,6 +362,7 @@ impl PreviewState {
             claim_on_resume: Cell::new(false),
             released_from: Cell::new(None),
             operations: RefCell::new(None),
+            preload: preload::NeighborPreload::default(),
         })
     }
 
@@ -450,6 +459,22 @@ fn connect_panel_action(state: &Rc<PreviewState>) {
             state.toggle_panel(entry, depth);
         }
     });
+}
+
+fn bind_preload(state: &Rc<PreviewState>) {
+    let weak = Rc::downgrade(state);
+    super::super::preferences::PreferenceManager::shared().bind_preference(
+        &state.pane,
+        super::super::preferences::PreferenceManager::preload_neighbor_previews,
+        move |_, enabled| {
+            if let Some(state) = weak.upgrade() {
+                state.preload.set_enabled(enabled);
+                if enabled {
+                    state.preload.schedule();
+                }
+            }
+        },
+    );
 }
 
 fn bind_text_wrap(wrap: &gtk::ToggleButton, state: &Rc<PreviewState>) {

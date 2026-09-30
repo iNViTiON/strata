@@ -14,7 +14,7 @@ use std::{
 #[cfg(any(test, feature = "rar"))]
 use std::process::Command;
 
-use crate::services::{ModelPreviewStage, model_preview::MAX_MODEL_INPUT_BYTES};
+use crate::services::{ModelPreviewStage, PreviewPriority, model_preview::MAX_MODEL_INPUT_BYTES};
 
 #[cfg(feature = "rar")]
 pub(crate) mod archive;
@@ -94,6 +94,7 @@ pub(crate) struct ParseRequest<'a> {
     pub(crate) value: i32,
     pub(crate) media_backend: MediaPreviewBackend,
     pub(crate) cancellation: &'a Cancellation,
+    pub(crate) priority: PreviewPriority,
 }
 
 pub(crate) fn parse(
@@ -109,8 +110,29 @@ pub(crate) fn parse(
         value,
         media_backend,
         cancellation,
+        priority: PreviewPriority::Current,
     };
     parse_with_progress(request, &|_| {})
+}
+
+/// Renders for a neighboring entry: same sandbox, but every shared limit
+/// serves interactive requests first.
+pub(crate) fn parse_neighbor(
+    input: &Path,
+    operation: ParseOperation,
+    value: i32,
+    media_backend: MediaPreviewBackend,
+    cancellation: &Cancellation,
+) -> Result<ParseOutput, String> {
+    let request = ParseRequest {
+        input,
+        operation,
+        value,
+        media_backend,
+        cancellation,
+        priority: PreviewPriority::Neighbor,
+    };
+    parse_sandboxed(request, &|_| {})
 }
 
 pub(crate) fn parse_with_progress(
@@ -404,8 +426,14 @@ fn parse_canonical(
         ..
     } = request;
     check_input(input, operation)?;
-    if let Some(result) = browser::preview(input, operation, cancellation) {
+    if let Some(result) = browser::preview(input, operation, cancellation, request.priority) {
         return result.map(browser_output);
+    }
+    // Without persistent workers there is no pool budget to keep neighbors within.
+    if request.priority == PreviewPriority::Neighbor
+        && matches!(operation, ParseOperation::PreviewImage)
+    {
+        return Err("Neighbor previews need persistent sandbox workers".to_owned());
     }
     let output = Arc::new(
         PrivateOutput::create().map_err(|error| crate::services::io_error_message(&error))?,

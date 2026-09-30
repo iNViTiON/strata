@@ -249,6 +249,7 @@ fn assert_saved_previews(manager: &PreferenceManager) {
         (ExpandedPreviewStyle::Fullscreen, false),
         "(expanded preview style, expanded preview shift controls)"
     );
+    assert!(manager.preload_neighbor_previews());
     assert_eq!(
         (
             manager.watch_network_folders(),
