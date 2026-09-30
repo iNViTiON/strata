@@ -540,53 +540,7 @@ impl DecodedMedia {
                         );
                     }
                 }
-                Some(Event::Packet(Packet::Frame(mut frame))) => {
-                    let header = imp.header.get().ok_or("Missing media header")?;
-                    if let Some(audio) = imp.audio.borrow().as_ref() {
-                        let samples_left = (header.duration_us - media::timestamp(frame.tick))
-                            * media::SAMPLE_RATE
-                            / 1_000_000;
-                        frame
-                            .samples
-                            .truncate(samples_left.min(media::AUDIO_BYTES as u64 / 4) as usize * 4);
-                        if !frame.samples.is_empty() {
-                            audio.push(
-                                std::mem::take(&mut frame.samples),
-                                media::timestamp(frame.tick - header.start_tick),
-                            )?;
-                        }
-                    }
-                    if !imp.first_frame.get() {
-                        let latency_ms = imp
-                            .starting
-                            .get()
-                            .map_or(0, |time| time.elapsed().as_millis())
-                            as u64;
-                        imp.first_frame.set(true);
-                        imp.starting.set(None);
-                        imp.last_progress.set(Some(Instant::now()));
-                        if self.is_playing() {
-                            imp.clock.set(Some(Instant::now()));
-                            if let Some(audio) = imp.audio.borrow().as_ref() {
-                                audio.play()?;
-                            }
-                        }
-                        self.present(frame);
-                        tracing::debug!(
-                            latency_ms,
-                            position_us = media::timestamp(header.start_tick),
-                            width = header.width,
-                            height = header.height,
-                            "sandboxed media first frame"
-                        );
-                        if self.is_seeking() {
-                            self.seek_success();
-                        }
-                        self.update(imp.position.get() as i64);
-                    } else {
-                        imp.frames.borrow_mut().push_back(frame);
-                    }
-                }
+                Some(Event::Packet(Packet::Frame(frame))) => self.accept_frame(frame)?,
                 Some(Event::Packet(Packet::End(duration))) => {
                     imp.end.set(Some(duration));
                     if let Some(audio) = imp.audio.borrow().as_ref() {
@@ -681,6 +635,57 @@ impl DecodedMedia {
             {
                 self.recover("Media playback clock stopped making progress")?;
             }
+        }
+        Ok(())
+    }
+
+    /// Takes one decoded frame from the active session: audio goes to the
+    /// output, the picture to the presentation queue.
+    fn accept_frame(&self, mut frame: Frame) -> Result<(), String> {
+        let imp = self.imp();
+        let header = imp.header.get().ok_or("Missing media header")?;
+        if let Some(audio) = imp.audio.borrow().as_ref() {
+            let samples_left = (header.duration_us - media::timestamp(frame.tick))
+                * media::SAMPLE_RATE
+                / 1_000_000;
+            frame
+                .samples
+                .truncate(samples_left.min(media::AUDIO_BYTES as u64 / 4) as usize * 4);
+            if !frame.samples.is_empty() {
+                audio.push(
+                    std::mem::take(&mut frame.samples),
+                    media::timestamp(frame.tick - header.start_tick),
+                )?;
+            }
+        }
+        if !imp.first_frame.get() {
+            let latency_ms = imp
+                .starting
+                .get()
+                .map_or(0, |time| time.elapsed().as_millis()) as u64;
+            imp.first_frame.set(true);
+            imp.starting.set(None);
+            imp.last_progress.set(Some(Instant::now()));
+            if self.is_playing() {
+                imp.clock.set(Some(Instant::now()));
+                if let Some(audio) = imp.audio.borrow().as_ref() {
+                    audio.play()?;
+                }
+            }
+            self.present(frame);
+            tracing::debug!(
+                latency_ms,
+                position_us = media::timestamp(header.start_tick),
+                width = header.width,
+                height = header.height,
+                "sandboxed media first frame"
+            );
+            if self.is_seeking() {
+                self.seek_success();
+            }
+            self.update(imp.position.get() as i64);
+        } else {
+            imp.frames.borrow_mut().push_back(frame);
         }
         Ok(())
     }
