@@ -23,9 +23,9 @@ use super::{
     },
 };
 
-const API_ROOT: &str = "https://api.github.com/repos/lgse/strata/releases";
-const COMMITS_ROOT: &str = "https://api.github.com/repos/lgse/strata/commits";
-const RELEASES_URL: &str = "https://github.com/lgse/strata/releases";
+const API_ROOT: &str = "https://api.github.com/repos/iNViTiON/strata/releases";
+const COMMITS_ROOT: &str = "https://api.github.com/repos/iNViTiON/strata/commits";
+const RELEASES_URL: &str = "https://github.com/iNViTiON/strata/releases";
 /// GitHub does not count requests to this endpoint against the API rate limit.
 const CONNECTION_TEST_URL: &str = "https://api.github.com/rate_limit";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
