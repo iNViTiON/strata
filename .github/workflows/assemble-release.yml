@@ -35,6 +35,8 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    outputs:
+      tag: ${{ steps.assemble.outputs.tag }}
     steps:
       # GITHUB_TOKEN cannot push commits that touch .github/workflows.
       - name: Check out the fork with the sync token
@@ -146,6 +148,35 @@ jobs:
           for number in $(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[].number'); do
             gh issue close "$number" --comment "Release assembled: $RUN_URL"
           done
+
+  # The x86_64 package is checked and uploaded by `assemble`; this caches the
+  # same published commit for aarch64 NixOS machines.
+  nix-aarch64:
+    needs: assemble
+    if: needs.assemble.outputs.tag != ''
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Check out the published release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.assemble.outputs.tag }}
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Use the Cachix cache
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: invition
+          skipPush: true
+
+      - name: Build and upload the aarch64 package
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
+        run: nix build .#strata --print-out-paths -L | cachix push invition
 
   # Binaries for other distributions. Keyed on the newest version tag without a
   # GitHub Release rather than on this run's publish, so a failed build is
@@ -312,7 +343,7 @@ jobs:
             --title "Strata $TAG (fork)" --notes "$notes"
 
   binaries-failed:
-    needs: [pending, binaries, github-release]
+    needs: [pending, binaries, github-release, nix-aarch64]
     if: failure()
     runs-on: ubuntu-24.04
     steps:
@@ -325,7 +356,7 @@ jobs:
         run: |
           set -euo pipefail
           gh label create "$ISSUE_LABEL" --color B60205 --description "Fork release assembly needs manual help" --force
-          body="Building or publishing the binaries for \`$TAG\` failed. The Nix release is unaffected; the next run retries.
+          body="Building or publishing the binaries or the aarch64 Nix package failed (version tag \`${TAG:-none}\`). The x86_64 Nix release is unaffected; binaries are retried by the next run, the aarch64 package by the next release.
 
           Run: $RUN_URL"
           existing="$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // empty')"

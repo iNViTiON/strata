@@ -186,8 +186,11 @@ nix.settings = {
 `nix flake update strata` then picks up the latest release. The VA-API bind is
 already in the package; do not add it again in an overlay.
 
-CI uploads every release it publishes to the `invition` Cachix cache (only the
-paths cache.nixos.org does not already serve). A download needs the exact
+The flake provides the package and the dev shell for `x86_64-linux` and
+`aarch64-linux`. CI uploads every release it publishes to the `invition` Cachix
+cache for both (only the paths cache.nixos.org does not already serve): the
+`assemble` job for x86_64 after its checks, and the `nix-aarch64` job on an ARM
+runner, which builds the same published commit without rerunning the checks. A download needs the exact
 derivation CI built, so do not set `inputs.nixpkgs.follows` (or override
 `rust-overlay`): the fork's own `flake.lock` must drive the build. With
 `follows`, the package still builds, just from source. Releases published
@@ -257,6 +260,12 @@ Upstream's publishing workflows cannot fire from `release` or its tags:
 `release.yml` is `workflow_dispatch` only, and `packaging.yml`,
 `publish-aur.yml`, `e2e-images.yml` and `ci.yml` trigger only on pushes to
 `main` or pull requests. None has a tag, `create` or `release` trigger.
+
+On top of that, every upstream workflow is disabled in the fork's Actions
+settings (`gh workflow disable`); only "Sync upstream" and "Assemble fork
+release" run. The setting is per workflow file, so a workflow upstream adds
+later starts out enabled: disable it with
+`gh workflow disable <file> -R iNViTiON/strata`.
 
 ### Binaries for other distributions
 
