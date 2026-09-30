@@ -35,6 +35,60 @@ fn raw_software_video_fits_landscape_portrait_hidpi_and_does_not_enlarge() {
 }
 
 #[test]
+fn the_expanded_view_decodes_at_the_source_frame_rate_up_to_the_screen_cap() {
+    let directory = tempfile::tempdir().expect("fixtures");
+    let fast = directory.path().join("fast.mkv");
+    fixture(
+        &fast,
+        Clip {
+            size: "320x180",
+            rate: 60,
+            seconds: 1,
+            audio: true,
+        },
+    );
+
+    let (header, frames, end) = decoded(&fast, "640x360:e@60", 0);
+    assert_eq!((header.fps, header.native_fps), (60, 60));
+    assert_eq!(frames.len(), 60);
+    assert!(frames.iter().all(|frame| frame.samples.len() == 3_200));
+    assert_eq!(end, 1_000_000);
+
+    let (header, frames, _) = decoded(&fast, "640x360:e@30", 0);
+    assert_eq!((header.fps, header.native_fps), (30, 60), "a slower screen");
+    assert_eq!(frames.len(), 30);
+
+    let (header, frames, _) = decoded(&fast, "640x360", 0);
+    assert_eq!((header.fps, header.native_fps), (30, 60), "the drawer");
+    assert_eq!(frames.len(), 30);
+
+    let (header, frames, _) = decoded(&fast, "640x360:e@60", 15);
+    assert_eq!(
+        header.start_tick, 30,
+        "half a second in, at 60 ticks a second"
+    );
+    assert_eq!(frames[0].tick, 30);
+    assert_eq!(frames.len(), 30);
+
+    let slow = directory.path().join("slow.mkv");
+    fixture(
+        &slow,
+        Clip {
+            size: "320x180",
+            rate: 24,
+            seconds: 1,
+            audio: false,
+        },
+    );
+    let (header, _, _) = decoded(&slow, "640x360:e@60", 0);
+    assert_eq!(
+        (header.fps, header.native_fps),
+        (30, 30),
+        "a slow source stays at 30"
+    );
+}
+
+#[test]
 fn full_sources_and_hour_long_seeks_reach_the_original_file_end() {
     let directory = tempfile::tempdir().expect("fixture");
     for (seconds, audio, starts) in [
@@ -273,11 +327,11 @@ fn variable_rate_clip(path: &Path) {
     );
 }
 
-fn assert_audio_runs_ahead_of_its_frames(frames: &[Frame]) {
-    assert!((0..8).all(|tick| !audible(audio_block(frames, tick))));
-    assert!(audible(audio_block(frames, 10)));
+fn assert_audio_runs_ahead_of_its_frames(header: Header, frames: &[Frame]) {
+    assert!((0..8).all(|tick| !audible(audio_block(header, frames, tick))));
+    assert!(audible(audio_block(header, frames, 10)));
     assert!(
-        audible(audio_block(frames, 89)) && !audible(&frames[89].samples),
+        audible(audio_block(header, frames, 89)) && !audible(&frames[89].samples),
         "audio keeps its timeline while running a lead ahead of the frames"
     );
 }
@@ -287,16 +341,16 @@ fn variable_frame_rate_and_offset_audio_keep_their_original_timeline() {
     let directory = tempfile::tempdir().expect("fixtures");
     let input = directory.path().join("variable.mkv");
     variable_rate_clip(&input);
-    let (_, frames, end) = decoded(&input, "160x90", 0);
+    let (header, frames, end) = decoded(&input, "160x90", 0);
     assert_eq!((end, frames.len()), (3_000_000, 90));
-    assert_audio_runs_ahead_of_its_frames(&frames);
+    assert_audio_runs_ahead_of_its_frames(header, &frames);
     assert!(
         frames[34].pixels == frames[35].pixels,
         "VFR frames must hold until their next presentation time"
     );
-    let (_, sought, _) = decoded(&input, "160x90", 45);
+    let (sought_header, sought, _) = decoded(&input, "160x90", 45);
     assert_eq!(sought[0].tick, 45);
-    assert!(audible(audio_block(&sought, 0)));
+    assert!(audible(audio_block(sought_header, &sought, 0)));
     assert!(
         frames[44..=46]
             .iter()

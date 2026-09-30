@@ -15,7 +15,7 @@ use crate::{
 use super::{
     AUDIO_LEAD_CAP_US, AUDIO_STUCK_TIMEOUT, DecodedMedia, EDGE_SAMPLE_INTERVAL, PAUSED_IDLE,
     PRESENTATION_QUEUE, QueuedFrame, RESIZE_DELAY, RESIZE_GROWTH, SEEK_DELAY, ambient,
-    audio::PcmOutput,
+    audio::PcmOutput, wanted_fps,
 };
 
 const MAX_STALL_RECOVERIES: u32 = 3;
@@ -235,7 +235,8 @@ impl DecodedMedia {
         imp.audio.replace(audio);
         imp.header.set(Some(header));
         self.invalidate_size();
-        imp.origin_tick.set(header.start_tick);
+        imp.origin_us
+            .set(media::timestamp_at(header.start_tick, header.fps));
         if imp.source.borrow().as_ref().map(|source| source.size) != imp.loaded_size.get() {
             imp.resized.set(Some(Instant::now()));
         }
@@ -285,6 +286,7 @@ impl DecodedMedia {
                 frame,
                 width: header.width,
                 height: header.height,
+                fps: header.fps,
             });
         } else {
             self.present_first_frame(frame, &header);
@@ -293,9 +295,9 @@ impl DecodedMedia {
     }
 
     /// Where a frame's audio belongs on the playback timeline. It counts from
-    /// the tick the clock started at, which a handover to a new decoder keeps.
-    pub(super) fn audio_timestamp(&self, tick: u32) -> u64 {
-        media::timestamp(tick.saturating_sub(self.imp().origin_tick.get()))
+    /// the point the clock started at, which a handover to a new decoder keeps.
+    pub(super) fn audio_timestamp(&self, tick: u32, fps: u32) -> u64 {
+        media::timestamp_at(tick, fps).saturating_sub(self.imp().origin_us.get())
     }
 
     // Blocks belong to successive audio ticks, running ahead of the frame.
@@ -306,20 +308,20 @@ impl DecodedMedia {
         samples: Vec<u8>,
     ) -> Result<(), String> {
         let imp = self.imp();
-        for block in samples.chunks(media::AUDIO_BYTES) {
-            let chunk = imp.audio_chunks.get();
-            let tick = imp.origin_tick.get().saturating_add(chunk);
-            let samples_left = header.duration_us.saturating_sub(media::timestamp(tick))
-                * media::SAMPLE_RATE
-                / 1_000_000;
+        // Each block is timed by the samples already pushed, which stays contiguous
+        // across a handover to a decoder with another frame rate.
+        for block in samples.chunks(header.audio_bytes()) {
+            let pushed = audio.pushed_frames();
+            let position_us = imp.origin_us.get() + pushed * 1_000_000 / media::SAMPLE_RATE;
+            let samples_left =
+                header.duration_us.saturating_sub(position_us) * media::SAMPLE_RATE / 1_000_000;
             let block = &block[..samples_left.min(block.len() as u64 / 4) as usize * 4];
             if !block.is_empty() {
                 if let Some(history) = imp.history.borrow_mut().as_mut() {
                     history.push(block);
                 }
-                audio.push(block.to_vec(), media::timestamp(chunk))?;
+                audio.push(block.to_vec(), pushed * 1_000_000 / media::SAMPLE_RATE)?;
             }
-            imp.audio_chunks.set(chunk + 1);
         }
         Ok(())
     }
@@ -341,7 +343,7 @@ impl DecodedMedia {
         self.present(frame, header.width, header.height);
         tracing::debug!(
             latency_ms = latency.map_or(0, |latency| latency.as_millis() as u64),
-            position_us = media::timestamp(header.start_tick),
+            position_us = media::timestamp_at(header.start_tick, header.fps),
             width = header.width,
             height = header.height,
             "sandboxed media first frame"
@@ -467,13 +469,15 @@ impl DecodedMedia {
 
     fn present_due_frames(&self) {
         let imp = self.imp();
+        // Only the newest due frame is shown; a texture for each frame that
+        // was already late would cost a large upload for nothing.
+        let mut due = None;
         loop {
             let frame = {
                 let mut frames = imp.frames.borrow_mut();
-                if frames
-                    .front()
-                    .is_some_and(|frame| media::timestamp(frame.frame.tick) <= imp.position.get())
-                {
+                if frames.front().is_some_and(|frame| {
+                    media::timestamp_at(frame.frame.tick, frame.fps) <= imp.position.get()
+                }) {
                     frames.pop_front()
                 } else {
                     None
@@ -482,6 +486,9 @@ impl DecodedMedia {
             let Some(queued) = frame else {
                 break;
             };
+            due = Some(queued);
+        }
+        if let Some(queued) = due {
             self.present(queued.frame, queued.width, queued.height);
         }
     }
@@ -540,8 +547,8 @@ impl DecodedMedia {
             imp.clock_base.set(relative);
             imp.clock.set(self.is_playing().then(Instant::now));
         }
-        let position = (media::timestamp(imp.origin_tick.get()) + relative)
-            .min(imp.end.get().unwrap_or(header.duration_us));
+        let position =
+            (imp.origin_us.get() + relative).min(imp.end.get().unwrap_or(header.duration_us));
         if position != imp.position.get() {
             imp.last_progress.set(Some(Instant::now()));
             // Wall-clock drift over stuck audio must not reset the strike cap.
@@ -650,9 +657,15 @@ impl DecodedMedia {
             scale = scale.min(1.0);
         }
         // Downsampling avoids a decoder restart and audible drop on shrink.
-        scale >= 1.0 + RESIZE_GROWTH
+        let growth = scale >= 1.0 + RESIZE_GROWTH
             && (f64::from(header.width) * (scale - 1.0) >= 2.0
-                || f64::from(header.height) * (scale - 1.0) >= 2.0)
+                || f64::from(header.height) * (scale - 1.0) >= 2.0);
+        // Leaving the expanded view returns to the drawer's lighter decode.
+        let collapsed = loaded.expanded
+            && !size.expanded
+            && (f64::from(header.width) * (1.0 - scale) >= 2.0
+                || f64::from(header.height) * (1.0 - scale) >= 2.0);
+        growth || collapsed || header.fps != wanted_fps(size, header)
     }
 
     pub(super) fn present(&self, frame: Frame, width: u32, height: u32) {

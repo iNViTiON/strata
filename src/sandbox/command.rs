@@ -12,7 +12,7 @@ use super::{
     ADDRESS_SPACE_LIMIT_BYTES, FILE_SIZE_LIMIT_BYTES, MAX_OUTPUT_BYTES, MediaPreviewBackend,
     ParseOperation, TEMPORARY_STORAGE_LIMIT_BYTES, runtime,
 };
-use crate::services::{MediaPreviewSize, ModelRender, ModelRenderPurpose};
+use crate::services::{ModelRender, ModelRenderPurpose};
 
 const ARCHITECTURES: [&str; 2] = ["x86_64-linux-gnu", "aarch64-linux-gnu"];
 
@@ -251,9 +251,13 @@ impl SandboxCommand<'_> {
     fn push_destination(&self, command: &mut Command) {
         match &self.operation {
             ParseOperation::PreviewMedia(size) | ParseOperation::PreviewAudio(size) => {
-                let size = MediaPreviewSize::new(size.width, size.height);
+                let size = size.normalized();
                 command.arg("/dev/stdout");
-                command.arg(format!("{}x{}", size.width, size.height));
+                command.arg(if size.expanded {
+                    format!("{}x{}:e@{}", size.width, size.height, size.max_fps)
+                } else {
+                    format!("{}x{}", size.width, size.height)
+                });
             }
             ParseOperation::AudioPeaks => {
                 command.arg("/dev/stdout");
