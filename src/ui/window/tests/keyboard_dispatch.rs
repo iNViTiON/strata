@@ -13,6 +13,7 @@ use crate::services::{
     LoadHandle, Preview, PreviewContent, PreviewEvent, PreviewProvider, PreviewRequest,
 };
 mod escape_precedence;
+mod expanded_preview;
 mod file_commands;
 mod folder_jump;
 mod footer_prompt;
