@@ -88,6 +88,29 @@ impl PreviewDrawer {
         })
     }
 
+    /// How many characters the text view holds, which grows while it fills in chunks.
+    pub(in crate::ui) fn text_char_count(&self) -> Option<i32> {
+        Some(
+            self.state
+                .text_view
+                .borrow()
+                .as_ref()?
+                .buffer()
+                .char_count(),
+        )
+    }
+
+    /// The line of text at the middle of the view.
+    pub(in crate::ui) fn text_center_line(&self) -> Option<i32> {
+        let view = self.state.text_view.borrow().clone()?;
+        let visible = view.visible_rect();
+        let iter = view.iter_at_location(
+            visible.x() + visible.width() / 2,
+            visible.y() + visible.height() / 2,
+        )?;
+        Some(iter.line())
+    }
+
     pub(in crate::ui) fn set_document_fraction(&self, fraction: f64) {
         if let Some(scroll) = self.state.primary_scroll() {
             let adjustment = scroll.vadjustment();
