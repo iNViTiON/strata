@@ -39,7 +39,7 @@
   wrapGAppsHook4,
   bubblewrap,
   cairo,
-  ffmpeg,
+  ffmpeg-headless,
   ffmpegthumbnailer,
   fontconfig,
   gdk-pixbuf,
@@ -61,7 +61,7 @@ let
   sandboxPath = lib.makeBinPath [
     imagemagick
     libraw
-    ffmpeg
+    ffmpeg-headless
     ffmpegthumbnailer
     fontconfig
     squashfsTools
