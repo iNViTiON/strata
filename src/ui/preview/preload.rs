@@ -45,6 +45,7 @@ struct Shared {
 
 struct Slot {
     entry: FileEntry,
+    kind: PreloadKind,
     size: MediaPreviewSize,
     // Only whether it is expanded matters: expanded renders do not depend on the width.
     expanded: bool,
@@ -53,8 +54,12 @@ struct Slot {
 }
 
 impl Slot {
+    // A parked stream is promoted at whatever size is asked for and then resized,
+    // so only other kinds depend on the request's size and detail.
     fn matches(&self, entry: &FileEntry, size: MediaPreviewSize, detail: PreviewDetail) -> bool {
-        self.size == size && self.expanded == detail.is_expanded() && same_file(&self.entry, entry)
+        same_file(&self.entry, entry)
+            && (self.kind == PreloadKind::Media
+                || (self.size == size && self.expanded == detail.is_expanded()))
     }
 
     fn is_failed(&self) -> bool {
@@ -191,6 +196,7 @@ impl NeighborPreload {
         };
         let media = slot.shared.media.borrow_mut().take()?;
         if media.promote() {
+            media.resize(source.size);
             tracing::debug!("parked neighbor preview promoted");
             Some(media)
         } else {
@@ -313,7 +319,7 @@ impl NeighborPreload {
                 continue;
             }
             tracing::debug!(?kind, "neighbor preview requested");
-            let slot = Self::start(state, entry, size, detail);
+            let slot = Self::start(state, entry, kind, size, detail);
             self.slots.borrow_mut().push(slot);
         }
         waiting
@@ -322,9 +328,15 @@ impl NeighborPreload {
     fn start(
         state: &Rc<PreviewState>,
         entry: FileEntry,
+        kind: PreloadKind,
         size: MediaPreviewSize,
         detail: PreviewDetail,
     ) -> Slot {
+        let size = if kind == PreloadKind::Media {
+            neighbor_media_size(size)
+        } else {
+            size
+        };
         let shared = Rc::new(Shared::default());
         let weak = Rc::downgrade(&shared);
         let emit = Rc::new(move |event: PreviewEvent| {
@@ -365,6 +377,7 @@ impl NeighborPreload {
         );
         Slot {
             entry,
+            kind,
             size,
             expanded: detail.is_expanded(),
             shared,
@@ -397,4 +410,10 @@ impl NeighborPreload {
             .find(|slot| slot.entry.display_name == name)
             .and_then(|slot| slot.shared.media.borrow().clone())
     }
+}
+
+/// Neighbors decode at the drawer's size and rate even while the preview is
+/// expanded; the expanded view upgrades the stream by a handover once it is shown.
+pub(super) fn neighbor_media_size(size: MediaPreviewSize) -> MediaPreviewSize {
+    MediaPreviewSize::new(size.width, size.height)
 }

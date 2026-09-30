@@ -526,16 +526,34 @@ mod preload {
                     glib::MainContext::default().iteration(false);
                     std::thread::sleep(std::time::Duration::from_millis(2));
                 }
-                let other = SandboxedMedia {
-                    size: MediaPreviewSize::new(100, 100),
+                let elsewhere = SandboxedMedia {
+                    path: "/other.mp4".into(),
                     ..source.clone()
                 };
-                assert!(state.preload.take_media(&other, &clip).is_none());
-                let promoted = state.preload.take_media(&source, &clip).expect("promoted");
+                assert!(state.preload.take_media(&elsewhere, &clip).is_none());
+                let expanded = SandboxedMedia {
+                    size: MediaPreviewSize::expanded(1920, 1080),
+                    ..source.clone()
+                };
+                let promoted = state
+                    .preload
+                    .take_media(&expanded, &clip)
+                    .expect("promoted at the size now asked for");
                 assert!(!promoted.is_parked_ready());
+                assert_eq!(promoted.requested_size(), Some(expanded.size));
                 assert!(state.preload.slot_names().is_empty());
                 promoted.close();
             },
+        );
+    }
+    #[test]
+    fn neighbors_decode_at_the_drawer_size_and_rate_even_while_expanded() {
+        let size =
+            super::super::preload::neighbor_media_size(MediaPreviewSize::expanded(3000, 2000));
+        assert!(!size.expanded);
+        assert_eq!(size.max_fps, 30);
+        assert!(
+            size.width <= MediaPreviewSize::MAX_EDGE && size.height <= MediaPreviewSize::MAX_EDGE
         );
     }
 }
