@@ -53,6 +53,15 @@ fn pdf_preview_requests_carry_a_bounded_page_and_viewport() {
         pdf_render_request("0:99999x1"),
         Ok((0, crate::sandbox::PdfRenderSize::new(99999, 1)))
     );
+    assert_eq!(
+        pdf_render_request("3:1900x3200:e"),
+        Ok((3, crate::sandbox::PdfRenderSize::new_expanded(1_900, 3_200)))
+    );
+    assert_eq!(
+        pdf_render_request("3:9999x9999:e"),
+        Ok((3, crate::sandbox::PdfRenderSize::new_expanded(2_400, 3_200)))
+    );
+    assert!(pdf_render_request("3:1900x3200:x").is_err());
     assert!(pdf_render_request("12").is_err());
     assert!(pdf_render_request("12:0").is_err());
     assert!(pdf_render_request("page:640x800").is_err());
@@ -832,4 +841,61 @@ fn archive_list_reports_corrupt_input_without_crashing() {
         Err(message) => assert_eq!(message, crate::adapters::INVALID_ARCHIVE),
         Ok(_) => panic!("corrupt input must not list"),
     }
+}
+
+#[test]
+fn expanded_image_previews_keep_far_more_pixels_than_the_drawer() {
+    let directory = tempfile::tempdir().expect("fixture directory");
+    let path = directory.path().join("large.png");
+    let pixbuf = gdk_pixbuf::Pixbuf::new(gdk_pixbuf::Colorspace::Rgb, false, 8, 3_600, 2_400)
+        .expect("large pixbuf");
+    pixbuf.fill(0x3366_99ff);
+    pixbuf
+        .savev(&path, "png", &[])
+        .expect("write large fixture");
+    let size = |png: Vec<u8>| {
+        let pixbuf = gdk_pixbuf::Pixbuf::from_read(std::io::Cursor::new(png)).expect("decode");
+        (pixbuf.width(), pixbuf.height())
+    };
+
+    assert_eq!(
+        size(super::document_media::image(&path, 800).expect("standard")),
+        (800, 533)
+    );
+    let edge = crate::sandbox::EXPANDED_IMAGE_EDGE;
+    assert_eq!(
+        size(super::document_media::image(&path, edge).expect("expanded")),
+        (2_880, 1_920)
+    );
+
+    let output = directory.path().join("expanded.png");
+    run(&[
+        "preview-image-expanded".into(),
+        path.to_string_lossy().into_owned(),
+        output.to_string_lossy().into_owned(),
+        "0".into(),
+        "software".into(),
+    ])
+    .expect("preview-image-expanded helper must succeed");
+    assert_eq!(
+        size(std::fs::read(&output).expect("output")),
+        (2_880, 1_920)
+    );
+
+    let response = super::browser_render(
+        &path,
+        crate::sandbox::browser::wire::Operation::PreviewImageExpanded,
+    );
+    assert_eq!(size(response.png), (2_880, 1_920));
+
+    let small = directory.path().join("small.png");
+    gdk_pixbuf::Pixbuf::new(gdk_pixbuf::Colorspace::Rgb, false, 8, 400, 300)
+        .expect("small pixbuf")
+        .savev(&small, "png", &[])
+        .expect("write small fixture");
+    assert_eq!(
+        size(super::document_media::image(&small, edge).expect("small expanded")),
+        (400, 300),
+        "a small image keeps its native size"
+    );
 }
