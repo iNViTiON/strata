@@ -735,6 +735,119 @@ fn a_document_keeps_its_place_when_the_text_reflows_to_a_new_width() {
     );
 }
 
+fn pump_frames(milliseconds: u64) {
+    let deadline = Instant::now() + Duration::from_millis(milliseconds);
+    while Instant::now() < deadline {
+        glib::MainContext::default().iteration(false);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+fn enable_motion() {
+    PreferenceManager::shared().set_reduce_motion(false);
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_enable_animations(true);
+    }
+}
+
+/// Runs the main loop for a while, checking the line at the middle of the view
+/// never leaves `line`. Returns how far the document's height moved.
+fn watch_reading_place(preview: &PreviewDrawer, line: i32, milliseconds: u64) -> f64 {
+    let deadline = Instant::now() + Duration::from_millis(milliseconds);
+    let (_, start) = preview.document_position().expect("position");
+    let mut travelled = 0.0f64;
+    while Instant::now() < deadline {
+        glib::MainContext::default().iteration(false);
+        if let (Some(middle), Some((_, extent))) =
+            (preview.text_center_line(), preview.document_position())
+        {
+            travelled = travelled.max((extent - start).abs());
+            assert!(
+                (middle - line).abs() <= 2,
+                "the reading place moved from line {line} to {middle} while the card moved"
+            );
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    travelled
+}
+
+#[test]
+fn a_document_keeps_its_place_while_the_card_grows_and_shrinks() {
+    crate::test_support::gtk_test(
+        "ui::window::tests::keyboard_dispatch::expanded_preview::a_document_keeps_its_place_while_the_card_grows_and_shrinks",
+        || {
+            let expanded = media_fixture();
+            enable_motion();
+            let preview = &expanded.fixture.preview;
+            PreferenceManager::shared().set_preview_text_wrap(true);
+            expanded.select("wrap.txt");
+            assert!(press_plain(&expanded, Key::space));
+            wait_until(|| {
+                preview
+                    .document_position()
+                    .is_some_and(|(_, extent)| extent > 1000.0)
+            });
+            preview.set_document_fraction(0.5);
+            let line = preview.text_center_line().expect("a text preview");
+
+            expanded.expand_view();
+            assert!(
+                watch_reading_place(preview, line, 900) > 1.0,
+                "the text reflowed to the card's width"
+            );
+
+            assert!(press_plain(&expanded, Key::Escape));
+            assert!(preview.is_collapsing(), "the card animates back");
+            assert!(watch_reading_place(preview, line, 900) > 1.0);
+            assert!(!preview.is_expanded());
+        },
+    );
+}
+
+#[test]
+fn a_card_that_is_sent_back_mid_animation_returns_to_the_drawer_untouched() {
+    crate::test_support::gtk_test(
+        "ui::window::tests::keyboard_dispatch::expanded_preview::a_card_that_is_sent_back_mid_animation_returns_to_the_drawer_untouched",
+        || {
+            let expanded = media_fixture();
+            enable_motion();
+            let preview = &expanded.fixture.preview;
+            expanded.select("a.txt");
+            assert!(press_plain(&expanded, Key::space));
+            expanded.wait_document();
+            let (pane, content) = (preview.pane_widget(), preview.content_widget());
+            let loads = expanded.provider.loads.get();
+
+            expanded.expand_view();
+            pump_frames(120);
+            assert!(press_plain(&expanded, Key::Escape));
+            assert!(preview.is_collapsing(), "Escape reverses the opening card");
+            assert!(
+                expanded.fixture.press(Key::space, SHIFT),
+                "keys are held back until the card is home"
+            );
+            assert!(preview.is_collapsing());
+            expanded.settle_collapse();
+
+            assert!(!preview.is_collapsing());
+            assert_eq!(
+                preview.pane_widget().ancestor(gtk::Revealer::static_type()),
+                Some(preview.widget()),
+                "the pane is back in the drawer"
+            );
+            assert_eq!(preview.pane_widget(), pane);
+            assert_eq!(preview.content_widget(), content);
+            assert_eq!(expanded.provider.loads.get(), loads, "nothing was reloaded");
+
+            expanded.select("a.txt");
+            expanded.expand_view();
+            assert!(press_plain(&expanded, Key::Escape));
+            expanded.settle_collapse();
+        },
+    );
+}
+
 #[test]
 fn expanding_an_image_swaps_in_a_larger_raster_and_keeps_zoom_and_place() {
     crate::test_support::gtk_test(
