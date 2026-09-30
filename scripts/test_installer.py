@@ -146,7 +146,7 @@ class InstallerFixture:
         self.environment.pop("NO_COLOR", None)
         target = subprocess.check_output(["uname", "-m"], text=True).strip()
         target = "aarch64" if target in ("aarch64", "arm64") else "x86_64"
-        self.archive_name = f"strata-1.0.0-{target}-unknown-linux-gnu.tar.gz"
+        self.archive_name = f"strata-1.0.0-nightly.20260101-{target}-unknown-linux-gnu.tar.gz"
         archive = self.root / self.archive_name
         with tarfile.open(archive, "w:gz") as bundle:
             files = {
@@ -180,7 +180,7 @@ while (($#)); do
 done
 printf "curl %s\\n" "$url" >> "$CALLS"
 case $url in
-  */latest) printf 'https://github.com/lgse/strata/releases/tag/v1.0.0' ;;
+  */latest) printf 'https://github.com/iNViTiON/strata/releases/tag/v1.0.0-nightly.20260101' ;;
   *.sha256) cp "$FIXTURE_ARCHIVE.sha256" "$output" ;;
   *) cp "$FIXTURE_ARCHIVE" "$output" ;;
 esac
@@ -309,7 +309,7 @@ class InstallerTests(unittest.TestCase):
             recorded_calls,
             [
                 "auth status --hostname github.com",
-                "attestation verify /tmp/strata.tar.gz --repo lgse/strata",
+                "attestation verify /tmp/strata.tar.gz --repo iNViTiON/strata",
             ],
         )
 
@@ -701,14 +701,14 @@ class InstallerTests(unittest.TestCase):
             child_pid = fixture.root / "download-pid"
             fixture.environment["DOWNLOAD_PID"] = str(child_pid)
             fixture.command("curl", '''case "$*" in
-  */latest*) printf 'https://github.com/lgse/strata/releases/tag/v1.0.0' ;;
+  */latest*) printf 'https://github.com/iNViTiON/strata/releases/tag/v1.0.0-nightly.20260101' ;;
   *) printf '%s' "$$" > "$DOWNLOAD_PID"; exec sleep 30 ;;
 esac
 ''')
             terminal = fixture.terminal()
             terminal.expect("Enter continue")
             terminal.send(b"\r")
-            terminal.expect("Download Strata 1.0.0")
+            terminal.expect("Download Strata 1.0.0-nightly.20260101")
             deadline = time.monotonic() + 3
             while not child_pid.exists() and time.monotonic() < deadline:
                 terminal.read()

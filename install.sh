@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-REPOSITORY="lgse/strata"
+REPOSITORY="iNViTiON/strata"
 APP_ID="io.github.lgse.Strata"
 MIN_GLIBC="2.39"
 REQUIRED_PACKAGES=(
@@ -1336,14 +1336,15 @@ detect_omarchy_major() {
   return 0
 }
 
-latest_stable_version() {
+latest_release_version() {
   local effective tag
   effective=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
     "https://github.com/$REPOSITORY/releases/latest") \
-    || die "Could not find the latest stable Strata release."
+    || die "Could not find the latest Strata release."
   tag=${effective##*/}
-  [[ $tag =~ ^v([0-9]+[.][0-9]+[.][0-9]+)$ ]] \
-    || die "GitHub returned an unexpected stable release tag: $tag"
+  # The fork publishes nightly builds only, each marked as the latest release.
+  [[ $tag =~ ^v([0-9]+[.][0-9]+[.][0-9]+-nightly[.][0-9]{8}([.][0-9]+)?)$ ]] \
+    || die "GitHub returned an unexpected release tag: $tag"
   printf '%s\n' "${BASH_REMATCH[1]}"
 }
 
@@ -1588,7 +1589,7 @@ main() {
   TEMP_DIR=$(mktemp -d)
   LOG_FILE=$(mktemp "${TMPDIR:-/tmp}/strata-install.XXXXXX.log")
   section "$(text installing)"
-  version=$(latest_stable_version)
+  version=$(latest_release_version)
   archive="strata-$version-$target.tar.gz"
   url="https://github.com/$REPOSITORY/releases/download/v$version"
   local -a download_flags=(--silent)

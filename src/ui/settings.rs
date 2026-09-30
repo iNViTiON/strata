@@ -1569,7 +1569,7 @@ fn release_notes_card(kind: ReleaseNotesKind, title: &str, initial: &str) -> Rel
     let notes = gtk::Box::new(gtk::Orientation::Vertical, 6);
     set_release_notes_message(&notes, initial);
     let fallback = gtk::LinkButton::with_label(
-        "https://github.com/lgse/strata/releases",
+        "https://github.com/iNViTiON/strata/releases",
         &crate::i18n::tr("View on GitHub"),
     );
     fallback.set_has_tooltip(false);
@@ -2017,7 +2017,7 @@ fn update_check_row_with(
                         title.set_text(&crate::i18n::tr("Couldn’t check for updates"));
                         crate::assets::set_primary_icon(&status_icon, icons::TRIANGLE_ALERT);
                         status.set_markup(&crate::i18n::tr(
-                            "Couldn't check for updates · <a href=\"https://github.com/lgse/strata/releases/latest\">View releases on GitHub</a>",
+                            "Couldn't check for updates · <a href=\"https://github.com/iNViTiON/strata/releases/latest\">View releases on GitHub</a>",
                         ));
                         available_notes.container.set_visible(false);
                         button.set_sensitive(true);
@@ -3144,7 +3144,7 @@ fn update_check_message(result: &UpdateCheck, update_method: UpdateMethod) -> St
             }
             .into_owned()
         }
-        UpdateCheck::Failed(message) => rust_i18n::t!("Couldn't check for updates: %{value1} · <a href=\"https://github.com/lgse/strata/releases/latest\">View releases on GitHub</a>", value1 = glib::markup_escape_text(message)).into_owned(),
+        UpdateCheck::Failed(message) => rust_i18n::t!("Couldn't check for updates: %{value1} · <a href=\"https://github.com/iNViTiON/strata/releases/latest\">View releases on GitHub</a>", value1 = glib::markup_escape_text(message)).into_owned(),
     }
 }
 
