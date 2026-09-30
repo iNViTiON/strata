@@ -61,7 +61,8 @@ Install it from a flake:
   inputs.strata.url = "github:iNViTiON/strata/release";
 
   # then, for example in an overlay:
-  #   strata = inputs.strata.packages.x86_64-linux.strata;
+  #   strata = inputs.strata.packages.${system}.strata;
+  # (x86_64-linux and aarch64-linux are both built and cached)
 
   # binary cache for published releases
   nixConfig = {
