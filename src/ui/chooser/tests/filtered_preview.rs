@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::*;
-use crate::ui::browser_modes::BrowserMode;
+use crate::ui::{browser_modes::BrowserMode, preferences::TypingMode};
 use std::time::{Duration, Instant};
 
 #[track_caller]
@@ -424,6 +424,120 @@ fn typing_a_character_opens_the_filter_with_that_query() {
                     ) && !state.view.filter_has_focus(),
                     "{mode:?}: the preference disables typing-to-search"
                 );
+            }
+        },
+    );
+}
+
+fn open_focused_chooser(
+    root: &Path,
+    mode: BrowserMode,
+    token: String,
+) -> (Rc<ChooserState>, Rc<Cell<Option<bool>>>) {
+    PreferenceManager::shared().set_browser_mode(mode);
+    let outcome = Rc::new(Cell::new(None));
+    let finished = outcome.clone();
+    let state = build_chooser(
+        ChooserRequest {
+            token,
+            title: "Chooser".into(),
+            accept_label: "Open".into(),
+            modal: false,
+            parent: None,
+            parent_size_hint: None,
+            initial_directory: root.into(),
+            kind: ChooserKind::Open {
+                directory: false,
+                multiple: false,
+            },
+            filters: Vec::new(),
+            current_filter: None,
+            choices: Vec::new(),
+        },
+        Arc::new(AtomicBool::new(false)),
+        move |result| finished.set(Some(result.is_ok())),
+    )
+    .expect("chooser");
+    let initialized = Rc::new(Cell::new(false));
+    let notify = initialized.clone();
+    glib::idle_add_local_once(move || notify.set(true));
+    wait_until(|| initialized.get());
+    let browser = state.view.browser();
+    wait_until(|| {
+        browser
+            .column_snapshot(0)
+            .is_some_and(|column| !column.loading)
+    });
+    browser.select(0, 0);
+    browser.focus_active();
+    wait_until(|| state.view.item_view_has_focus());
+    (state, outcome)
+}
+
+#[test]
+fn jump_to_name_selects_a_prefix_match_before_escape_can_close_the_chooser() {
+    crate::test_support::gtk_test(
+        "ui::chooser::tests::filtered_preview::jump_to_name_selects_a_prefix_match_before_escape_can_close_the_chooser",
+        || {
+            crate::ui::prepare_portal_ui();
+            let root = tempfile::tempdir().expect("fixture");
+            for name in ["alpha.txt", "beta.txt", "Gamma.txt", "gamut.txt"] {
+                std::fs::write(root.path().join(name), "text").expect("file");
+            }
+            let none = gtk::gdk::ModifierType::empty();
+            let control = gtk::gdk::ModifierType::CONTROL_MASK;
+            for mode in [BrowserMode::Columns, BrowserMode::Icons, BrowserMode::List] {
+                for typing in [TypingMode::JumpToName, TypingMode::VimKeys] {
+                    let preferences = PreferenceManager::shared();
+                    preferences.set_type_to_search(false);
+                    preferences.set_typing_mode(typing);
+                    let (state, outcome) = open_focused_chooser(
+                        root.path(),
+                        mode,
+                        format!("jump-to-name-{mode:?}-{typing:?}"),
+                    );
+                    state
+                        .view
+                        .set_jump_to_name_idle_timeout(Duration::from_secs(60));
+                    let browser = state.view.browser();
+                    let focused = || {
+                        browser
+                            .focused_entry()
+                            .map(|entry| entry.display_name)
+                            .unwrap_or_default()
+                    };
+                    let window_keys = keys(&state.window);
+                    let label = format!("{mode:?} {typing:?}");
+
+                    if typing == TypingMode::VimKeys {
+                        assert!(
+                            !press(&window_keys, gtk::gdk::Key::g, none),
+                            "{label}: letters stay inert"
+                        );
+                        assert!(press(&window_keys, gtk::gdk::Key::slash, none), "{label}");
+                    }
+                    assert!(press(&window_keys, gtk::gdk::Key::g, none), "{label}");
+                    assert!(state.view.jump_to_name_active(), "{label}");
+                    assert_eq!(focused(), "Gamma.txt", "{label}");
+                    assert!(press(&window_keys, gtk::gdk::Key::g, none), "{label}");
+                    assert_eq!(focused(), "gamut.txt", "{label}: same letter cycles");
+                    assert!(press(&window_keys, gtk::gdk::Key::p, control), "{label}");
+                    assert_eq!(focused(), "Gamma.txt", "{label}: Ctrl+P");
+                    assert!(press(&window_keys, gtk::gdk::Key::x, none), "{label}");
+                    assert!(!state.view.jump_to_name_matched(), "{label}");
+                    assert_eq!(focused(), "Gamma.txt", "{label}: a miss keeps it");
+                    assert!(
+                        press(&window_keys, gtk::gdk::Key::BackSpace, none),
+                        "{label}"
+                    );
+
+                    assert!(press(&window_keys, gtk::gdk::Key::Escape, none), "{label}");
+                    assert!(!state.view.jump_to_name_active(), "{label}");
+                    assert_eq!(outcome.get(), None, "{label}: the first Esc keeps it open");
+                    assert_eq!(focused(), "Gamma.txt", "{label}: and the selection");
+                    assert!(press(&window_keys, gtk::gdk::Key::Escape, none), "{label}");
+                    assert_eq!(outcome.get(), Some(false), "{label}: the next Esc cancels");
+                }
             }
         },
     );
