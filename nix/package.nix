@@ -1,6 +1,6 @@
 # Strata built from this tree, for the fork's `release` branch.
 #
-# Based on Th1nkK1D's package in github:Th1nkK1D/lk-nix (pkgs/strata/package.nix):
+# Based on Th1nkK1D's package in github:Th1nkK1D/nixos-config (pkgs/strata/package.nix):
 #
 #   MIT License
 #
