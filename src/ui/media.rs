@@ -94,9 +94,10 @@ mod imp {
         pub(super) texture: RefCell<Option<gdk::Texture>>,
         pub(super) frames: RefCell<VecDeque<QueuedFrame>>,
         pub(super) handover: RefCell<Option<Handover>>,
-        /// The point in the media, in microseconds, that the playback clock and
-        /// the audio timeline count from.
-        pub(super) origin_us: Cell<u64>,
+        /// The point in the media, as a count of 48 kHz audio samples, that the
+        /// playback clock and the audio timeline count from. Samples keep it
+        /// exact: the audio output checks timestamps to the sample.
+        pub(super) origin_samples: Cell<u64>,
         pub(super) last_tick: Cell<Option<u32>>,
         pub(super) start_latency: Cell<Option<Duration>>,
         pub(super) audio: RefCell<Option<PcmOutput>>,
@@ -420,7 +421,7 @@ impl DecodedMedia {
         }
         if let Some(header) = imp.header.get() {
             let position =
-                (imp.origin_us.get() + relative).min(imp.end.get().unwrap_or(header.duration_us));
+                (self.origin_us() + relative).min(imp.end.get().unwrap_or(header.duration_us));
             if position != imp.position.get() {
                 imp.last_progress.set(Some(Instant::now()));
                 // Wall-clock drift over stuck audio must not reset the strike cap.
@@ -548,8 +549,8 @@ impl DecodedMedia {
                         .transpose()?;
                     imp.audio.replace(audio);
                     imp.header.set(Some(header));
-                    imp.origin_us
-                        .set(media::timestamp_at(header.start_tick, header.fps));
+                    imp.origin_samples
+                        .set(media::samples_at(header.start_tick, header.fps));
                     if imp.source.borrow().as_ref().map(|source| source.size)
                         != imp.loaded_size.get()
                     {
@@ -677,7 +678,12 @@ impl DecodedMedia {
     /// Where a frame's audio belongs on the playback timeline. It counts from
     /// the point the clock started at, which a handover to a new decoder keeps.
     fn audio_timestamp(&self, tick: u32, fps: u32) -> u64 {
-        media::timestamp_at(tick, fps).saturating_sub(self.imp().origin_us.get())
+        let samples = media::samples_at(tick, fps).saturating_sub(self.imp().origin_samples.get());
+        samples * 1_000_000 / media::SAMPLE_RATE
+    }
+
+    fn origin_us(&self) -> u64 {
+        self.imp().origin_samples.get() * 1_000_000 / media::SAMPLE_RATE
     }
 
     /// Takes one decoded frame from the active session: audio goes to the
