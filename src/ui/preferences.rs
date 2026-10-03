@@ -156,6 +156,8 @@ pub(in crate::ui) struct Preferences {
     #[serde(default = "default_enabled")]
     expanded_preview_shift_controls: bool,
     #[serde(default)]
+    preload_neighbor_previews: bool,
+    #[serde(default)]
     auto_refresh_interval: u32,
     #[serde(default = "crate::sandbox::browser::default_worker_limit")]
     thumbnail_workers: usize,
@@ -260,6 +262,7 @@ impl Default for Preferences {
             preview_autoplay: false,
             expanded_preview_style: ExpandedPreviewStyle::default(),
             expanded_preview_shift_controls: true,
+            preload_neighbor_previews: false,
             auto_refresh_interval: 0,
             thumbnail_workers: crate::sandbox::browser::default_worker_limit(),
             icons_thumbnail_size: default_icons_thumbnail_size(),
@@ -821,6 +824,15 @@ impl PreferenceManager {
         self.preferences
             .borrow_mut()
             .expanded_preview_shift_controls = shift_controls;
+        self.save_preferences();
+    }
+
+    pub fn preload_neighbor_previews(&self) -> bool {
+        self.preferences.borrow().preload_neighbor_previews
+    }
+
+    pub fn set_preload_neighbor_previews(&self, enabled: bool) {
+        self.preferences.borrow_mut().preload_neighbor_previews = enabled;
         self.save_preferences();
     }
 
