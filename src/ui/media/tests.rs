@@ -660,7 +660,7 @@ fn a_playing_stream_changes_size_without_stopping_or_going_back() {
             assert!(!media.is_ended());
             let imp = media.imp();
             assert!(imp.handover.borrow().is_none());
-            assert_eq!(imp.origin_us.get(), 0, "the timeline keeps its origin");
+            assert_eq!(imp.origin_samples.get(), 0, "the timeline keeps its origin");
             let handed_over_at = imp.header.get().expect("header").start_tick;
             assert!(
                 handed_over_at > 0,
@@ -709,7 +709,7 @@ fn a_faster_decoder_takes_over_on_the_seek_grid_and_hands_back() {
             );
             assert!(header.start_tick > 0 && header.start_tick.is_multiple_of(2));
             assert_eq!(
-                media.imp().origin_us.get(),
+                media.imp().origin_samples.get(),
                 0,
                 "the timeline keeps its origin"
             );
@@ -749,6 +749,46 @@ fn a_slow_screen_keeps_the_expanded_view_at_thirty_frames() {
             media.resize(MediaPreviewSize::expanded(640, 360).for_refresh_rate(30_000));
             spin_until("handover", || picture_size(&media) == (640, 360));
             assert_eq!(media.imp().header.get().expect("header").fps, 30);
+        },
+    );
+}
+
+#[test]
+fn audio_timestamps_stay_sample_exact_from_any_start_tick_and_across_a_rate_change() {
+    crate::test_support::gtk_test(
+        "ui::media::tests::audio_timestamps_stay_sample_exact_from_any_start_tick_and_across_a_rate_change",
+        || {
+            let media = DecodedMedia::new(test_source("/audio-timestamps"));
+            // What the audio output demands of each chunk: its exact sample position.
+            let expected = |samples: u64| samples * 1_000_000 / media::SAMPLE_RATE;
+            for start in [0, 1, 2, 3, 107_851, 107_852] {
+                for fps in [30, 60] {
+                    let first = start * (fps / media::FPS);
+                    media
+                        .imp()
+                        .origin_samples
+                        .set(media::samples_at(first, fps));
+                    let per_tick = media::SAMPLE_RATE / u64::from(fps);
+                    for n in 0..200 {
+                        assert_eq!(
+                            media.audio_timestamp(first + n, fps),
+                            expected(u64::from(n) * per_tick),
+                            "start {start} at {fps} fps, tick {n}"
+                        );
+                    }
+                }
+            }
+
+            let start = 107_851;
+            media.imp().origin_samples.set(media::samples_at(start, 30));
+            let switch = (start + 40) * 2;
+            for (n, samples) in [(0, 0), (1, 800), (2, 1_600)] {
+                assert_eq!(
+                    media.audio_timestamp(switch + n, 60),
+                    expected(40 * 1_600 + samples),
+                    "a 60 fps decoder continues where the 30 fps one stopped"
+                );
+            }
         },
     );
 }
