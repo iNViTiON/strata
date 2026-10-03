@@ -3357,6 +3357,32 @@ menubutton.column-header-action > button:active {
   box-shadow: inset 0 -1px alpha(@theme_accent, 0.42);
 }
 
+.jump-to-name {
+  background: @theme_surface;
+  border: 1px solid alpha(@theme_border, 0.6);
+  border-bottom-color: @theme_accent;
+  border-radius: 9px;
+  box-shadow: 0 0 14px alpha(@theme_glow, 0.24);
+  min-height: 28px;
+  padding: 0 11px;
+}
+
+.jump-to-name-text {
+  color: @theme_text;
+}
+
+.jump-to-name-placeholder {
+  color: @theme_dim_text;
+}
+
+.jump-to-name.no-match {
+  border-color: alpha(@theme_danger, 0.7);
+}
+
+.jump-to-name.no-match .jump-to-name-text {
+  color: @theme_danger;
+}
+
 .column-popover contents {
   background: @theme_surface;
   border: 1px solid alpha(@theme_border, 0.6);
