@@ -131,3 +131,35 @@ def test_a_playing_video_keeps_its_place_across_expanding_and_collapsing(strata)
     assert seen == sorted(seen), f"the playhead never moved back: {seen}"
     assert not strata.preview_shows("Preview unavailable")
     assert not strata.preview_shows("busy")
+
+
+@pytest.mark.preferences(preview_autoplay=True)
+def test_a_clip_stays_playable_after_jumping_in_time_and_coming_back(strata):
+    strata.select_entry_with_keyboard("d-clip.mp4")
+    strata.keyboard.press("space")
+    strata.wait(lambda: strata.preview_shows("/0:08"), "the sandboxed video")
+    strata.wait(lambda: (media_seconds(strata) or 0) >= 1, "playback to start")
+    strata.keyboard.press("shift+space")
+    strata.wait(lambda: strata.preview_shows("/0:08"), "the expanded video")
+
+    def plays_on():
+        baseline = media_seconds(strata)
+        strata.wait(
+            lambda: not strata.preview_shows("Preview unavailable")
+            and media_seconds(strata) is not None
+            and media_seconds(strata) != baseline,
+            "playback to carry on after the jump",
+        )
+        assert not strata.preview_shows("Preview unavailable")
+
+    # Each jump restarts the decoder at a position that is rarely a whole second.
+    for key in ["shift+Right", "shift+Left", "shift+Right"]:
+        strata.keyboard.press(key)
+        plays_on()
+
+    strata.keyboard.press("Up")
+    strata.wait(lambda: not strata.preview_shows("/0:08"), "the neighbouring file")
+    strata.keyboard.press("Down")
+    strata.wait(lambda: strata.preview_shows("/0:08"), "the clip again, where it was left")
+    plays_on()
+    assert not strata.preview_shows("Preview unavailable")
