@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::*;
-use crate::media::{AUDIO_BYTES, Frame};
+use crate::media::Frame;
 
 pub(crate) fn stream(header: Header) -> Result<Session, String> {
     stream_to(header, header.duration_us)
@@ -29,7 +29,7 @@ pub(crate) fn stream_to(header: Header, end: u64) -> Result<Session, String> {
                 tick,
                 pixels: vec![(tick % 255) as u8; header.video_bytes()],
                 samples: if header.audio {
-                    vec![0; AUDIO_BYTES]
+                    vec![0; header.audio_bytes()]
                 } else {
                     Vec::new()
                 },
@@ -64,6 +64,8 @@ fn four_slots_backpressure_cancellation_and_repeated_teardown_are_bounded() {
         audio: true,
         duration_us: 60_000_000,
         start_tick: 0,
+        fps: 30,
+        native_fps: 30,
     };
     for _ in 0..30 {
         let workers: Vec<_> = (0..MAX_WORKERS)
@@ -118,6 +120,8 @@ fn decoder_failure_and_trailing_output_are_not_successful_end_of_stream() {
         audio: false,
         duration_us: 33_333,
         start_tick: 0,
+        fps: 30,
+        native_fps: 30,
     };
     let mut bytes = Vec::new();
     h.write(&mut bytes).expect("header");
@@ -126,7 +130,7 @@ fn decoder_failure_and_trailing_output_are_not_successful_end_of_stream() {
         pixels: vec![0; 4],
         samples: vec![],
     }
-    .write(&mut bytes)
+    .write(&mut bytes, 30)
     .expect("frame");
     crate::media::write_end(&mut bytes, 1, h.duration_us).expect("end");
     let file = tempfile::NamedTempFile::new().expect("wire fixture");
