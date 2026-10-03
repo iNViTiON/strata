@@ -235,8 +235,8 @@ impl DecodedMedia {
         imp.audio.replace(audio);
         imp.header.set(Some(header));
         self.invalidate_size();
-        imp.origin_us
-            .set(media::timestamp_at(header.start_tick, header.fps));
+        imp.origin_samples
+            .set(media::samples_at(header.start_tick, header.fps));
         if imp.source.borrow().as_ref().map(|source| source.size) != imp.loaded_size.get() {
             imp.resized.set(Some(Instant::now()));
         }
@@ -297,7 +297,12 @@ impl DecodedMedia {
     /// Where a frame's audio belongs on the playback timeline. It counts from
     /// the point the clock started at, which a handover to a new decoder keeps.
     pub(super) fn audio_timestamp(&self, tick: u32, fps: u32) -> u64 {
-        media::timestamp_at(tick, fps).saturating_sub(self.imp().origin_us.get())
+        let samples = media::samples_at(tick, fps).saturating_sub(self.imp().origin_samples.get());
+        samples * 1_000_000 / media::SAMPLE_RATE
+    }
+
+    fn origin_us(&self) -> u64 {
+        self.imp().origin_samples.get() * 1_000_000 / media::SAMPLE_RATE
     }
 
     // Blocks belong to successive audio ticks, running ahead of the frame.
@@ -312,7 +317,7 @@ impl DecodedMedia {
         // across a handover to a decoder with another frame rate.
         for block in samples.chunks(header.audio_bytes()) {
             let pushed = audio.pushed_frames();
-            let position_us = imp.origin_us.get() + pushed * 1_000_000 / media::SAMPLE_RATE;
+            let position_us = self.origin_us() + pushed * 1_000_000 / media::SAMPLE_RATE;
             let samples_left =
                 header.duration_us.saturating_sub(position_us) * media::SAMPLE_RATE / 1_000_000;
             let block = &block[..samples_left.min(block.len() as u64 / 4) as usize * 4];
@@ -548,7 +553,7 @@ impl DecodedMedia {
             imp.clock.set(self.is_playing().then(Instant::now));
         }
         let position =
-            (imp.origin_us.get() + relative).min(imp.end.get().unwrap_or(header.duration_us));
+            (self.origin_us() + relative).min(imp.end.get().unwrap_or(header.duration_us));
         if position != imp.position.get() {
             imp.last_progress.set(Some(Instant::now()));
             // Wall-clock drift over stuck audio must not reset the strike cap.

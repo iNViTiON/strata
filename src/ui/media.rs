@@ -84,9 +84,10 @@ mod imp {
         pub(super) texture: RefCell<Option<gdk::Texture>>,
         pub(super) frames: RefCell<VecDeque<QueuedFrame>>,
         pub(super) handover: RefCell<Option<Handover>>,
-        /// The point in the media, in microseconds, that the playback clock and
-        /// the audio timeline count from.
-        pub(super) origin_us: Cell<u64>,
+        /// The point in the media, as a count of 48 kHz audio samples, that the
+        /// playback clock and the audio timeline count from. Samples keep it
+        /// exact: the audio output checks timestamps to the sample.
+        pub(super) origin_samples: Cell<u64>,
         pub(super) last_tick: Cell<Option<u32>>,
         pub(super) start_latency: Cell<Option<Duration>>,
         pub(super) audio: RefCell<Option<PcmOutput>>,

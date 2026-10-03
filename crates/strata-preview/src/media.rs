@@ -39,6 +39,11 @@ pub fn timestamp_at(tick: u32, fps: u32) -> u64 {
     u64::from(tick) * 1_000_000 / u64::from(fps)
 }
 
+/// The audio sample, at 48 kHz, that a tick of a decoder running at `fps` starts at.
+pub fn samples_at(tick: u32, fps: u32) -> u64 {
+    u64::from(tick) * SAMPLE_RATE / u64::from(fps)
+}
+
 pub fn is_frame_rate(fps: u32) -> bool {
     fps == FPS || fps == MAX_FPS
 }
