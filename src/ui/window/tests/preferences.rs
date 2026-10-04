@@ -4,7 +4,7 @@ use gtk::prelude::*;
 
 use super::*;
 use crate::ui::browser_modes::BrowserMode;
-use crate::ui::preferences::{PreferenceManager, TypingMode};
+use crate::ui::preferences::PreferenceManager;
 use crate::ui::tenxer_mode::UNUSED_SUBTITLE;
 
 #[test]
@@ -617,6 +617,8 @@ fn browsing_preferences_stay_saved_but_unused_until_exit() {
 
 #[test]
 fn default_typing_mode_applies_before_settings_and_follows_the_control_in_both_windows() {
+    use crate::ui::preferences::TypingMode;
+
     gtk_test(
         "ui::window::tests::preferences::default_typing_mode_applies_before_settings_and_follows_the_control_in_both_windows",
         || {
@@ -1122,6 +1124,49 @@ fn description_named(root: &impl gtk::prelude::IsA<gtk::Widget>, title: &str) ->
     panic!("description for {title}");
 }
 
+fn choice_named(root: &impl gtk::prelude::IsA<gtk::Widget>, title: &str) -> gtk::MenuButton {
+    let label = label_named(root.upcast_ref(), title);
+    let mut current = label.parent();
+    while let Some(widget) = current {
+        let mut found = None;
+        walk(&widget, &mut |child| {
+            if found.is_none()
+                && let Some(button) = child.downcast_ref::<gtk::MenuButton>()
+            {
+                found = Some(button.clone());
+            }
+        });
+        if let Some(button) = found {
+            return button;
+        }
+        current = widget.parent();
+    }
+    panic!("choice {title}");
+}
+
+fn choose_option(choice: &gtk::MenuButton, label: &str) {
+    let popover = choice.popover().expect("choice popover");
+    let mut option = None;
+    walk(popover.upcast_ref(), &mut |widget| {
+        if option.is_none()
+            && let Some(button) = widget.downcast_ref::<gtk::Button>()
+        {
+            let mut labelled = false;
+            walk(button.upcast_ref(), &mut |child| {
+                labelled |= child
+                    .downcast_ref::<gtk::Label>()
+                    .is_some_and(|candidate| candidate.text() == label);
+            });
+            if labelled {
+                option = Some(button.clone());
+            }
+        }
+    });
+    option
+        .unwrap_or_else(|| panic!("option {label}"))
+        .emit_clicked();
+}
+
 fn activate_named(root: &impl gtk::prelude::IsA<gtk::Widget>, tooltip: &str) {
     let button = controls_in_shown_pane(root.upcast_ref(), tooltip)
         .into_iter()
@@ -1154,40 +1199,4 @@ fn walk(widget: &gtk::Widget, visit: &mut impl FnMut(&gtk::Widget)) {
         walk(&widget, visit);
         child = widget.next_sibling();
     }
-}
-
-fn choice_named(root: &impl gtk::prelude::IsA<gtk::Widget>, title: &str) -> gtk::MenuButton {
-    let mut found = None;
-    walk(root.upcast_ref(), &mut |widget| {
-        if found.is_none()
-            && let Some(button) = widget.downcast_ref::<gtk::MenuButton>()
-            && button.tooltip_text().as_deref() == Some(title)
-        {
-            found = Some(button.clone());
-        }
-    });
-    found.unwrap_or_else(|| panic!("choice {title}"))
-}
-
-fn choose_option(choice: &gtk::MenuButton, label: &str) {
-    let popover = choice.popover().expect("choice popover");
-    let mut option = None;
-    walk(popover.upcast_ref(), &mut |widget| {
-        if option.is_none()
-            && let Some(button) = widget.downcast_ref::<gtk::Button>()
-        {
-            let mut labelled = false;
-            walk(button.upcast_ref(), &mut |child| {
-                labelled |= child
-                    .downcast_ref::<gtk::Label>()
-                    .is_some_and(|candidate| candidate.text() == label);
-            });
-            if labelled {
-                option = Some(button.clone());
-            }
-        }
-    });
-    option
-        .unwrap_or_else(|| panic!("option {label}"))
-        .emit_clicked();
 }
