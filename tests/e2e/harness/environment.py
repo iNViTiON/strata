@@ -41,6 +41,7 @@ DEFAULT_PREFERENCES: dict[str, object] = {
     "columns_mirror_selection": True,
     "search_open_files_directly": False,
     "type_to_search": True,
+    "typing_mode": "vim_keys",
     "filter_include_subfolders": True,
     "show_keybinding_hints": True,
     "reduce_motion": True,

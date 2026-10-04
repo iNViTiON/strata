@@ -2237,6 +2237,11 @@ fn install_shortcuts(
         {
             return glib::Propagation::Proceed;
         }
+        if let Some(result) =
+            super::jump_to_name::handle_key(&state.view, &preferences, key, modifiers)
+        {
+            return result;
+        }
         if super::window::is_context_menu_shortcut(key, modifiers)
             && !focused.as_ref().is_some_and(|widget| {
                 super::focus_navigation::editable(widget)

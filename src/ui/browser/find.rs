@@ -359,7 +359,7 @@ impl BrowserView {
         true
     }
 
-    fn cursor_index(&self, depth: usize, order: &[usize]) -> Option<usize> {
+    pub(super) fn cursor_index(&self, depth: usize, order: &[usize]) -> Option<usize> {
         let (_, position, _) = self
             .state
             .browser
@@ -383,6 +383,11 @@ impl BrowserView {
             .place_cursor(depth, position, Some(order));
         self.state.cursor_keeps_focus.set(false);
         self.state.mode_views.borrow().set_cursor_keeps_focus(false);
+        self.scroll_cursor_into_view(depth, position, take_focus);
+    }
+
+    /// `take_focus` lets the listing's keyboard focus follow the item.
+    pub(super) fn scroll_cursor_into_view(&self, depth: usize, position: usize, take_focus: bool) {
         let target = if self.view_mode() == BrowserMode::Columns {
             let columns = self.state.columns.borrow();
             columns.get(depth).and_then(|column| {

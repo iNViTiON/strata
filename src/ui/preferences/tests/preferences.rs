@@ -54,6 +54,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
     saved.remove("date_format");
     saved.remove("send_to_recent_destinations");
     saved.remove("tenxer_mode");
+    saved.remove("typing_mode");
     let restored: Preferences = saved.try_into().expect("backward-compatible preferences");
     assert_eq!(
         restored,
@@ -63,6 +64,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
             date_format: "relative".into(),
             send_to_recent_destinations: HashMap::new(),
             tenxer_mode: false,
+            typing_mode: TypingMode::VimKeys,
             ..non_default_preferences()
         }
     );
@@ -382,6 +384,7 @@ fn every_saved_preference_loads_before_any_settings_page_exists() {
             );
             assert!(manager.search_open_files_directly());
             assert!(!manager.type_to_search());
+            assert_eq!(manager.typing_mode(), TypingMode::JumpToName);
             assert!(manager.arrow_navigation_scoped());
             assert!(manager.tenxer_mode());
             assert!(!manager.filter_include_subfolders());
@@ -565,6 +568,7 @@ fn all_preference_setters_publish_and_persist_without_duplicate_notifications() 
                 |m| m.set_video_preview_backend(MediaPreviewBackend::VaApi),
                 |m| m.set_search_open_files_directly(false),
                 |m| m.set_type_to_search(true),
+                |m| m.set_typing_mode(TypingMode::VimKeys),
                 |m| m.set_arrow_navigation_scoped(false),
                 |m| m.set_tenxer_mode(false),
                 |m| m.set_filter_include_subfolders(true),
