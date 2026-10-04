@@ -799,9 +799,15 @@ fn a_neighbor_yields_to_an_interactive_waiter() {
                 }
             });
         }
-        drop(held);
+        let mut held = held;
+        drop(held.pop());
         let first = rx.recv_timeout(Duration::from_secs(5)).expect("admission");
+        assert_eq!(
+            first, "current",
+            "the one free slot goes to the interactive waiter"
+        );
+        drop(held);
         let second = rx.recv_timeout(Duration::from_secs(5)).expect("admission");
-        assert_eq!((first, second), ("current", "neighbor"));
+        assert_eq!(second, "neighbor");
     });
 }
