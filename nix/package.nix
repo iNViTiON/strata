@@ -26,9 +26,9 @@
 #
 # Changes from his package: builds the local tree with crane, the pinned
 # toolchain and Cargo.lock (dependencies as their own cached derivation),
-# patches every sandbox call site the current source has, extends the helper
-# PATH, binds /run/opengl-driver for VA-API, and marks the bundled UnRAR
-# license.
+# points the sandbox at the store through upstream's build-time STRATA_SANDBOX_*
+# variables, patches the call sites they do not cover, binds
+# /run/opengl-driver for VA-API, and marks the bundled UnRAR license.
 {
   lib,
   craneLib,
@@ -59,7 +59,7 @@
 }:
 
 let
-  # Helpers run inside Bubblewrap with this PATH; upstream hardcodes /usr/bin.
+  # Helpers run inside Bubblewrap with this PATH; upstream defaults to /usr/bin.
   sandboxPath = lib.makeBinPath [
     imagemagick
     libraw
@@ -104,32 +104,36 @@ craneLib.buildPackage {
   inherit version src cargoArtifacts;
   strictDeps = true;
 
-  # The sandbox is written for an FHS host: bind the store instead of /usr, give
-  # helpers a store PATH and the gdk-pixbuf loader cache (bwrap clears the
-  # environment), and pin prlimit and bwrap. libva loads its VA-API driver from
-  # /run/opengl-driver, which the sandbox does not otherwise see.
+  # The sandbox is written for an FHS host. Upstream reads its runtime paths at
+  # build time (docs/preview-sandbox.md, "Packaging non-FHS runtimes"): bind the
+  # store instead of /usr, give helpers a store PATH and the gdk-pixbuf loader
+  # cache (bwrap clears the environment), and pin prlimit.
+  env = {
+    STRATA_BUILD_COMMIT = commit;
+    STRATA_SANDBOX_PATH = sandboxPath;
+    STRATA_SANDBOX_ROOT = "/nix/store";
+    STRATA_SANDBOX_PRLIMIT = prlimit;
+    STRATA_SANDBOX_GDK_PIXBUF_MODULE_FILE = "${gdk-pixbuf}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache";
+  };
+
+  # What those variables do not cover: pin bwrap, and expose /run/opengl-driver,
+  # where libva loads its VA-API driver from and the sandbox does not otherwise
+  # look.
   postPatch = ''
     substituteInPlace src/sandbox.rs \
-      --replace-fail '"/usr/bin",' '"${sandboxPath}", "--setenv", "GDK_PIXBUF_MODULE_FILE", "${gdk-pixbuf}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache",' \
-      --replace-fail '"/usr",' '"/nix/store",' \
       --replace-fail '"/app",' '"/app", "--ro-bind-try", "/run/opengl-driver", "/run/opengl-driver",' \
-      --replace-fail '.arg("/usr/bin/prlimit")' '.arg("${prlimit}")' \
       --replace-fail 'crate::trusted_command::resolve("bwrap")' '${bwrap}'
-    substituteInPlace src/sandbox/archive.rs \
-      --replace-fail '.arg("/usr/bin/prlimit")' '.arg("${prlimit}")' \
-      --replace-fail 'crate::trusted_command::resolve("bwrap")' '${bwrap}'
-    substituteInPlace src/sandbox/media.rs src/sandbox/browser.rs \
+    substituteInPlace src/sandbox/archive.rs src/sandbox/media.rs src/sandbox/browser.rs \
       --replace-fail 'crate::trusted_command::resolve("bwrap")' '${bwrap}'
 
-    # --replace-fail misses call sites added upstream later.
+    # --replace-fail misses call sites added upstream later, and a hardcoded
+    # path bypasses the build-time variables.
     if grep -rnE --include='*.rs' --exclude=tests.rs --exclude-dir=tests \
-      '"/usr/bin/prlimit"|resolve\("bwrap"\)|"/usr/bin",' src/sandbox.rs src/sandbox; then
+      '\.arg\("/usr/bin/prlimit"\)|resolve\("bwrap"\)|"/usr/bin",|"/usr",' src/sandbox.rs src/sandbox; then
       echo "error: unpatched FHS sandbox paths remain; extend postPatch" >&2
       exit 1
     fi
   '';
-
-  env.STRATA_BUILD_COMMIT = commit;
 
   nativeBuildInputs = [
     pkg-config
