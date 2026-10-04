@@ -105,11 +105,17 @@ fn a_sixty_frame_decoder_ticks_twice_as_fast_on_the_same_seek_grid() {
     assert_eq!(fast.ticks(), header().ticks() * 2);
     assert_eq!(timestamp_at(2, 60), timestamp(1));
 
+    assert_eq!(fast.audio_lead_ticks(), header().audio_lead_ticks() * 2);
+    assert_eq!(
+        audio_bytes(fast, fast.start_tick),
+        fast.audio_bytes() * (fast.audio_lead_ticks() as usize + 1),
+        "the first record carries two seconds of lead at either rate"
+    );
     let mut frame = Vec::new();
     Frame {
         tick: 10,
         pixels: vec![0; fast.video_bytes()],
-        samples: vec![0; fast.audio_bytes()],
+        samples: vec![0; audio_bytes(fast, 10)],
     }
     .write(&mut frame, 60)
     .expect("frame");

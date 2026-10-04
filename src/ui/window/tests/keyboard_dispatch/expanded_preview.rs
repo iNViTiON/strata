@@ -207,6 +207,13 @@ fn expand_fullscreen(expanded: &Expanded) -> gtk::Window {
         .expect("the fullscreen style opens a window")
 }
 
+fn drawer_of(preview: &PreviewDrawer) -> Option<gtk::Widget> {
+    preview
+        .pane_widget()
+        .ancestor(gtk::Revealer::static_type())
+        .and_then(|revealer| revealer.parent())
+}
+
 fn press_plain(expanded: &Expanded, key: Key) -> bool {
     expanded.fixture.press(key, ModifierType::empty())
 }
@@ -233,7 +240,7 @@ fn shift_space_expands_the_preview_and_escape_returns_to_the_drawer() {
             expanded.settle_collapse();
             assert!(preview.is_enabled(), "Escape leaves the small preview open");
             assert_eq!(
-                preview.pane_widget().ancestor(gtk::Revealer::static_type()),
+                drawer_of(preview),
                 Some(preview.widget()),
                 "the pane returned to the drawer"
             );
@@ -480,7 +487,7 @@ fn the_fullscreen_style_moves_the_live_pane_into_its_own_window() {
             assert!(press_in(&window, Key::Escape, ModifierType::empty()));
             assert!(!preview.is_expanded());
             assert_eq!(
-                preview.pane_widget().ancestor(gtk::Revealer::static_type()),
+                drawer_of(preview),
                 Some(preview.widget()),
                 "the pane returned to the drawer"
             );
@@ -530,11 +537,7 @@ fn closing_the_fullscreen_window_returns_to_the_drawer() {
             assert!(!expanded.fixture.preview.is_expanded());
             assert!(expanded.fixture.preview.is_enabled());
             assert_eq!(
-                expanded
-                    .fixture
-                    .preview
-                    .pane_widget()
-                    .ancestor(gtk::Revealer::static_type()),
+                drawer_of(&expanded.fixture.preview),
                 Some(expanded.fixture.preview.widget())
             );
         },
@@ -848,7 +851,7 @@ fn a_card_that_is_sent_back_mid_animation_returns_to_the_drawer_untouched() {
 
             assert!(!preview.is_collapsing());
             assert_eq!(
-                preview.pane_widget().ancestor(gtk::Revealer::static_type()),
+                drawer_of(preview),
                 Some(preview.widget()),
                 "the pane is back in the drawer"
             );
