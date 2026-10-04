@@ -469,7 +469,7 @@ fn every_saved_preference_loads_before_any_settings_page_exists() {
                 }
             );
             assert!(!manager.checks_for_updates());
-            assert_eq!(manager.release_channel(), Channel::Nightly);
+            assert_eq!(manager.release_channel(), Channel::Preview);
             assert!(manager.preview_muted());
             assert_eq!(manager.preview_volume(), 0.35);
             assert!(manager.preview_text_wrap());
