@@ -143,7 +143,8 @@ fn the_expanded_view_decodes_at_the_source_frame_rate_up_to_the_screen_cap() {
     let (header, frames, end) = decoded(&fast, "640x360:e@60", 0);
     assert_eq!((header.fps, header.native_fps), (60, 60));
     assert_eq!(frames.len(), 60);
-    assert!(frames.iter().all(|frame| frame.samples.len() == 3_200));
+    assert_eq!(frames[0].samples.len(), 3_200 * 121, "two seconds of lead");
+    assert!(frames[1..].iter().all(|frame| frame.samples.len() == 3_200));
     assert_eq!(end, 1_000_000);
 
     let (header, frames, _) = decoded(&fast, "640x360:e@30", 0);
