@@ -143,7 +143,8 @@ fn the_expanded_view_decodes_at_the_source_frame_rate_up_to_the_screen_cap() {
     let (header, frames, end) = decoded(&fast, "640x360:e@60", 0);
     assert_eq!((header.fps, header.native_fps), (60, 60));
     assert_eq!(frames.len(), 60);
-    assert!(frames.iter().all(|frame| frame.samples.len() == 3_200));
+    assert_eq!(frames[0].samples.len(), 3_200 * 121, "two seconds of lead");
+    assert!(frames[1..].iter().all(|frame| frame.samples.len() == 3_200));
     assert_eq!(end, 1_000_000);
 
     let (header, frames, _) = decoded(&fast, "640x360:e@30", 0);
@@ -697,10 +698,20 @@ fn variable_frame_rate_and_offset_audio_keep_their_original_timeline() {
     let (header, frames, end) = decoded(&input, "160x90", 0);
     assert_eq!(end, 3_000_000);
     assert_eq!(frames.len(), 90);
-    assert!((0..8).all(|tick| audio_block(header, &frames, tick).iter().all(|sample| *sample == 0)));
-    assert!(audio_block(header, &frames, 10).iter().any(|sample| *sample != 0));
+    assert!((0..8).all(|tick| {
+        audio_block(header, &frames, tick)
+            .iter()
+            .all(|sample| *sample == 0)
+    }));
     assert!(
-        audio_block(header, &frames, 89).iter().any(|sample| *sample != 0)
+        audio_block(header, &frames, 10)
+            .iter()
+            .any(|sample| *sample != 0)
+    );
+    assert!(
+        audio_block(header, &frames, 89)
+            .iter()
+            .any(|sample| *sample != 0)
             && frames[89].samples.iter().all(|sample| *sample == 0),
         "audio keeps its timeline while running a lead ahead of the frames"
     );
@@ -710,7 +721,11 @@ fn variable_frame_rate_and_offset_audio_keep_their_original_timeline() {
     );
     let (sought_header, sought, _) = decoded(&input, "160x90", 45);
     assert_eq!(sought[0].tick, 45);
-    assert!(audio_block(sought_header, &sought, 0).iter().any(|sample| *sample != 0));
+    assert!(
+        audio_block(sought_header, &sought, 0)
+            .iter()
+            .any(|sample| *sample != 0)
+    );
     assert!(
         frames[44..=46]
             .iter()

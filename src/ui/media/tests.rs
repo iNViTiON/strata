@@ -3,8 +3,8 @@
 use std::{cell::Cell, path::PathBuf, rc::Rc, time::Duration};
 
 use super::*;
-use gstreamer as gst;
 use crate::sandbox::{MediaPreviewBackend, media::tests::stream};
+use gstreamer as gst;
 
 const TEST_DURATION_US: u64 = 60_000_000;
 
@@ -556,6 +556,7 @@ fn source(width: i32, height: i32) -> SandboxedMedia {
         size: MediaPreviewSize::new(width, height),
         backend: MediaPreviewBackend::Software,
         input_owner: None,
+        audio_only: false,
     }
 }
 
@@ -565,6 +566,15 @@ fn loader(
     loads: &Rc<Cell<usize>>,
     offset: u32,
     busy: Option<std::ops::Range<usize>>,
+) -> TestLoader {
+    loader_with(loads, offset, busy, false)
+}
+
+fn loader_with(
+    loads: &Rc<Cell<usize>>,
+    offset: u32,
+    busy: Option<std::ops::Range<usize>>,
+    audio: bool,
 ) -> TestLoader {
     let loads = loads.clone();
     Rc::new(move |source: SandboxedMedia, tick| {
@@ -582,7 +592,7 @@ fn loader(
         stream(Header {
             width,
             height,
-            audio: false,
+            audio,
             duration_us: DURATION_US,
             start_tick: (if count == 0 { tick } else { tick + offset }) * (fps / media::FPS),
             fps,
@@ -735,6 +745,57 @@ fn a_faster_decoder_takes_over_on_the_seek_grid_and_hands_back() {
             assert_eq!(loads.get(), 3);
             assert!(media.is_playing());
             assert!(media.error().is_none());
+        },
+    );
+}
+
+#[test]
+fn a_handover_keeps_the_audio_gapless_when_each_decoder_carries_a_lead() {
+    crate::test_support::gtk_test(
+        "ui::media::tests::a_handover_keeps_the_audio_gapless_when_each_decoder_carries_a_lead",
+        || {
+            for (target, fps) in [
+                (MediaPreviewSize::new(640, 360), 30),
+                (MediaPreviewSize::expanded(640, 360), 60),
+            ] {
+                let loads = Rc::new(Cell::new(0));
+                let media = DecodedMedia::new(SandboxedMedia {
+                    path: PathBuf::from(format!("/nonexistent/handover-{fps}.mp4")),
+                    ..source(320, 180)
+                });
+                media.imp().audio_sink.replace(Some(model_sink(0, 33_333)));
+                media
+                    .imp()
+                    .loader
+                    .replace(Some(loader_with(&loads, 0, None, true)));
+                media.play();
+                spin_until("first frames", || {
+                    picture_size(&media) == (320, 180) && media.timestamp() > 300_000
+                });
+
+                media.resize(target);
+                spin_until("handover", || {
+                    media.error().is_none()
+                        && picture_size(&media) == (640, 360)
+                        && media
+                            .imp()
+                            .header
+                            .get()
+                            .is_some_and(|header| header.fps == fps)
+                });
+                assert_eq!(loads.get(), 2, "{fps} fps: the handover, not a restart");
+
+                let after = media.timestamp();
+                spin_until("playback continues", || {
+                    media.error().is_none() && media.timestamp() > after + 300_000
+                });
+                assert!(
+                    media.error().is_none(),
+                    "{fps} fps: the audio stayed contiguous across the seam"
+                );
+                assert_eq!(loads.get(), 2, "{fps} fps: no recovery restart");
+                media.close();
+            }
         },
     );
 }
