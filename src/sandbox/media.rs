@@ -3,7 +3,7 @@
 use std::{
     io::{self, Read},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc,
     },
     thread,
@@ -18,27 +18,71 @@ use crate::{
 use super::*;
 
 pub(crate) const MAX_WORKERS: usize = 4;
+// Neighbor previews draw on their own budget, so they can never make a
+// player the user asked for report "busy".
+pub(crate) const MAX_PRELOAD_WORKERS: usize = 2;
 const QUEUED_PACKETS: usize = 3;
+const ACTIVE_POLL: Duration = Duration::from_millis(10);
+// A parked worker has nothing to hand over until promoted; wake it less often.
+const PARKED_POLL: Duration = Duration::from_millis(50);
 static ACTIVE_WORKERS: AtomicUsize = AtomicUsize::new(0);
+static PRELOAD_WORKERS: AtomicUsize = AtomicUsize::new(0);
 
-struct WorkerSlot;
+struct WorkerSlot {
+    parked: AtomicBool,
+}
 
 impl WorkerSlot {
     fn acquire() -> Option<Self> {
-        ACTIVE_WORKERS
+        Self::reserve(&ACTIVE_WORKERS, MAX_WORKERS).then(|| Self {
+            parked: AtomicBool::new(false),
+        })
+    }
+
+    fn acquire_preload() -> Option<Self> {
+        Self::reserve(&PRELOAD_WORKERS, MAX_PRELOAD_WORKERS).then(|| Self {
+            parked: AtomicBool::new(true),
+        })
+    }
+
+    fn reserve(counter: &AtomicUsize, limit: usize) -> bool {
+        counter
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                (count < MAX_WORKERS).then_some(count + 1)
+                (count < limit).then_some(count + 1)
             })
-            .ok()
-            .map(|_| Self)
+            .is_ok()
+    }
+
+    /// Moves the slot onto the interactive budget. Fails, leaving the slot
+    /// parked, while all interactive players are taken.
+    fn promote(&self) -> bool {
+        if !self.parked.load(Ordering::Acquire) {
+            return true;
+        }
+        if !Self::reserve(&ACTIVE_WORKERS, MAX_WORKERS) {
+            return false;
+        }
+        if self.parked.swap(false, Ordering::AcqRel) {
+            PRELOAD_WORKERS.fetch_sub(1, Ordering::AcqRel);
+        } else {
+            ACTIVE_WORKERS.fetch_sub(1, Ordering::AcqRel);
+        }
+        true
     }
 }
 
 impl Drop for WorkerSlot {
     fn drop(&mut self) {
-        let previous = ACTIVE_WORKERS.fetch_sub(1, Ordering::AcqRel);
+        let parked = self.parked.load(Ordering::Acquire);
+        if parked {
+            PRELOAD_WORKERS.fetch_sub(1, Ordering::AcqRel);
+        } else {
+            ACTIVE_WORKERS.fetch_sub(1, Ordering::AcqRel);
+        }
         tracing::debug!(
-            active_workers = previous - 1,
+            parked,
+            active_workers = ACTIVE_WORKERS.load(Ordering::Acquire),
+            preload_workers = PRELOAD_WORKERS.load(Ordering::Acquire),
             "sandboxed media worker stopped"
         );
     }
@@ -54,16 +98,39 @@ pub(crate) struct Session {
     cancellation: Cancellation,
     receiver: mpsc::Receiver<Event>,
     worker: thread::JoinHandle<()>,
-    _slot: Arc<WorkerSlot>,
+    slot: Arc<WorkerSlot>,
 }
 
 impl Session {
     pub fn start(source: SandboxedMedia, start_tick: u32) -> Result<Self, String> {
         let slot = WorkerSlot::acquire().ok_or_else(|| "Media previews are busy (four active players). Pause or close another preview and retry.".to_owned())?;
+        Self::spawn(source, start_tick, slot)
+    }
+
+    /// A worker for a neighboring file: it decodes its first frames, then
+    /// blocks on backpressure until `promote` hands it to a player.
+    pub fn start_preload(source: SandboxedMedia, start_tick: u32) -> Result<Self, String> {
+        let slot = WorkerSlot::acquire_preload()
+            .ok_or_else(|| "Neighbor previews are using every preload worker".to_owned())?;
+        Self::spawn(source, start_tick, slot)
+    }
+
+    pub fn preload_available() -> bool {
+        PRELOAD_WORKERS.load(Ordering::Acquire) < MAX_PRELOAD_WORKERS
+    }
+
+    /// Moves a preloaded worker onto the interactive budget without touching
+    /// the decoder. `false` means every interactive slot is in use.
+    pub fn promote(&self) -> bool {
+        self.slot.promote()
+    }
+
+    fn spawn(source: SandboxedMedia, start_tick: u32, slot: WorkerSlot) -> Result<Self, String> {
         let slot = Arc::new(slot);
         let worker_slot = slot.clone();
         tracing::debug!(
             active_workers = ACTIVE_WORKERS.load(Ordering::Acquire),
+            preload_workers = PRELOAD_WORKERS.load(Ordering::Acquire),
             "sandboxed media worker started"
         );
         let cancellation = Cancellation::default();
@@ -72,9 +139,9 @@ impl Session {
         let worker = thread::Builder::new()
             .name("media-preview".into())
             .spawn(move || {
-                let _slot = worker_slot;
-                if let Err(error) = render(&source, start_tick, &cancelled, &sender) {
-                    let _sent = send(&sender, Event::Failed(error), &cancelled);
+                let slot = worker_slot;
+                if let Err(error) = render(&source, start_tick, &cancelled, &sender, &slot.parked) {
+                    let _sent = send(&sender, Event::Failed(error), &cancelled, &slot.parked);
                 }
             })
             .map_err(|error| error.to_string())?;
@@ -82,7 +149,7 @@ impl Session {
             cancellation,
             receiver,
             worker,
-            _slot: slot,
+            slot,
         })
     }
 
@@ -115,6 +182,7 @@ fn send(
     sender: &mpsc::SyncSender<Event>,
     mut event: Event,
     cancellation: &Cancellation,
+    parked: &AtomicBool,
 ) -> Result<(), String> {
     loop {
         if cancellation.is_cancelled() {
@@ -125,7 +193,11 @@ fn send(
             Err(mpsc::TrySendError::Disconnected(_)) => return Err("Preview closed".into()),
             Err(mpsc::TrySendError::Full(pending)) => event = pending,
         }
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(if parked.load(Ordering::Acquire) {
+            PARKED_POLL
+        } else {
+            ACTIVE_POLL
+        });
     }
 }
 
@@ -186,6 +258,7 @@ fn render(
     start_tick: u32,
     cancellation: &Cancellation,
     sender: &mpsc::SyncSender<Event>,
+    parked: &AtomicBool,
 ) -> Result<(), String> {
     let operation = if source.audio_only {
         ParseOperation::PreviewAudio(source.size)
@@ -193,7 +266,7 @@ fn render(
         ParseOperation::PreviewMedia(source.size)
     };
     let (mut child, _output) = spawn_helper(source, operation, Some(start_tick), cancellation)?;
-    let result = consume(&mut child, source, start_tick, cancellation, sender);
+    let result = consume(&mut child, source, start_tick, cancellation, sender, parked);
     // Also tear down descendants which keep a pipe open or outlive their leader.
     if result.is_err() {
         terminate(&mut child);
@@ -207,6 +280,7 @@ fn consume(
     start_tick: u32,
     cancellation: &Cancellation,
     sender: &mpsc::SyncSender<Event>,
+    parked: &AtomicBool,
 ) -> io::Result<()> {
     let stdout = child
         .stdout
@@ -218,7 +292,7 @@ fn consume(
         cancellation,
     };
     let header = Header::read(&mut reader, source.size, start_tick)?;
-    send(sender, Event::Prepared(header), cancellation).map_err(io::Error::other)?;
+    send(sender, Event::Prepared(header), cancellation, parked).map_err(io::Error::other)?;
     let mut decoder = Decoder::new(header);
     loop {
         reader.deadline = Instant::now() + FRAME_TIMEOUT;
@@ -233,11 +307,16 @@ fn consume(
             if !status.success() {
                 return Err(io::Error::other("The sandboxed decoder failed"));
             }
-            send(sender, Event::Packet(Packet::End(duration)), cancellation)
-                .map_err(io::Error::other)?;
+            send(
+                sender,
+                Event::Packet(Packet::End(duration)),
+                cancellation,
+                parked,
+            )
+            .map_err(io::Error::other)?;
             return Ok(());
         }
-        send(sender, Event::Packet(packet), cancellation).map_err(io::Error::other)?;
+        send(sender, Event::Packet(packet), cancellation, parked).map_err(io::Error::other)?;
     }
 }
 

@@ -16,7 +16,7 @@ use std::{
 use rustix::process::{Pid, Signal, kill_process_group};
 
 use crate::services::{
-    ArchiveFormat, MediaPreviewSize, ModelFormat, ModelRender, SecretString,
+    ArchiveFormat, MediaPreviewSize, ModelFormat, ModelRender, PreviewPriority, SecretString,
     model_preview::MAX_MODEL_INPUT_BYTES,
 };
 
@@ -418,6 +418,7 @@ pub(crate) fn parse_with_progress(
         media_backend,
         cancellation,
         progress,
+        PreviewPriority::Current,
     );
     match result {
         Err(error)
@@ -427,6 +428,26 @@ pub(crate) fn parse_with_progress(
         }
         result => result,
     }
+}
+
+/// Renders for a neighboring entry: same sandbox, but every shared limit
+/// serves interactive requests first.
+pub(crate) fn parse_neighbor(
+    input: &Path,
+    operation: ParseOperation,
+    value: i32,
+    media_backend: MediaPreviewBackend,
+    cancellation: &Cancellation,
+) -> Result<ParseOutput, String> {
+    parse_sandboxed(
+        input,
+        operation,
+        value,
+        media_backend,
+        cancellation,
+        &|_| {},
+        PreviewPriority::Neighbor,
+    )
 }
 
 fn is_archive_contract_message(message: &str) -> bool {
@@ -442,6 +463,7 @@ fn parse_sandboxed(
     media_backend: MediaPreviewBackend,
     cancellation: &Cancellation,
     progress: &dyn Fn(crate::services::ModelPreviewStage),
+    priority: PreviewPriority,
 ) -> Result<ParseOutput, String> {
     if cancellation.is_cancelled() {
         return Err("Preview cancelled".to_owned());
@@ -477,13 +499,17 @@ fn parse_sandboxed(
             },
         );
     }
-    if let Some(result) = browser::preview(&input, &operation, cancellation) {
+    if let Some(result) = browser::preview(&input, &operation, cancellation, priority) {
         return result.map(|data| ParseOutput {
             data,
             page: 0,
             pages: 0,
             text_layer: None,
         });
+    }
+    // Without persistent workers there is no pool budget to keep neighbors within.
+    if priority == PreviewPriority::Neighbor && matches!(operation, ParseOperation::PreviewImage) {
+        return Err("Neighbor previews need persistent sandbox workers".to_owned());
     }
 
     let output = PrivateOutput::create().map_err(|error| error.to_string())?;
