@@ -201,7 +201,7 @@ impl ExpandedLayer {
         self.imp().card.get()
     }
 
-    fn progress(&self) -> f64 {
+    pub(super) fn progress(&self) -> f64 {
         self.imp().progress.get()
     }
 

@@ -738,14 +738,6 @@ fn a_document_keeps_its_place_when_the_text_reflows_to_a_new_width() {
     );
 }
 
-fn pump_frames(milliseconds: u64) {
-    let deadline = Instant::now() + Duration::from_millis(milliseconds);
-    while Instant::now() < deadline {
-        glib::MainContext::default().iteration(false);
-        std::thread::sleep(Duration::from_millis(2));
-    }
-}
-
 fn enable_motion() {
     PreferenceManager::shared().set_reduce_motion(false);
     if let Some(settings) = gtk::Settings::default() {
@@ -823,7 +815,11 @@ fn a_card_that_is_sent_back_mid_animation_returns_to_the_drawer_untouched() {
             let loads = expanded.provider.loads.get();
 
             expanded.expand_view();
-            pump_frames(120);
+            wait_until(|| {
+                preview
+                    .card_progress()
+                    .is_some_and(|progress| progress > 0.02)
+            });
             assert!(press_plain(&expanded, Key::Escape));
             assert!(preview.is_collapsing(), "Escape reverses the opening card");
             assert!(

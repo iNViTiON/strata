@@ -179,6 +179,15 @@ impl PreviewDrawer {
         self.state.expanded.collapsing.get()
     }
 
+    /// How far the overlay card has opened, from `0.0` to `1.0`.
+    #[cfg(test)]
+    pub(in crate::ui) fn card_progress(&self) -> Option<f64> {
+        match self.state.expanded.host.borrow().as_ref()? {
+            Host::Overlay { layer, .. } => Some(layer.progress()),
+            Host::Window { .. } => None,
+        }
+    }
+
     /// Expands the open preview, or opens `target` directly into the expanded
     /// view when the drawer is closed.
     pub(in crate::ui) fn expand(&self, target: Option<(FileEntry, Option<usize>)>) -> bool {
