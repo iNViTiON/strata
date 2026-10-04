@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    media::{self, AUDIO_BYTES, FRAME_TIMEOUT, Frame, Header, TimedReader},
+    media::{self, FRAME_TIMEOUT, Frame, Header, TimedReader},
     sandbox::{Cancellation, MediaPreviewBackend, gpu_devices, numbered_name},
     services::MediaPreviewSize,
 };
@@ -38,6 +38,8 @@ struct Input {
     cover: bool,
     gif_period_us: Option<u64>,
     raw_video: bool,
+    /// The expanded view scales more carefully, since it shows the frame large.
+    expanded: bool,
 }
 
 pub(super) fn run(
@@ -86,18 +88,21 @@ fn stream(
         let Ok(mut decoder) = RawDecoder::spawn(input, &input_info, &backend) else {
             continue;
         };
-        let Ok(Some(first)) = decoder.frame(start_tick, deadline) else {
+        let header = input_info.header;
+        let Ok(Some(first)) = decoder.frame(header.start_tick, deadline) else {
             continue;
         };
         let result = (|| -> io::Result<()> {
-            input_info.header.write(writer)?;
-            first.write(writer)?;
-            let mut next = start_tick + 1;
-            while next < input_info.header.ticks() {
+            header.write(writer)?;
+            first.write(writer, header.fps)?;
+            decoder.keep(first.pixels);
+            let mut next = header.start_tick + 1;
+            while next < header.ticks() {
                 let Some(frame) = decoder.frame(next, Instant::now() + FRAME_TIMEOUT)? else {
                     break;
                 };
-                frame.write(writer)?;
+                frame.write(writer, header.fps)?;
+                decoder.keep(frame.pixels);
                 next += 1;
             }
             if !decoder.successful()? {
@@ -106,7 +111,9 @@ fn stream(
             media::write_end(
                 writer,
                 next,
-                input_info.header.duration_us.min(media::timestamp(next)),
+                header
+                    .duration_us
+                    .min(media::timestamp_at(next, header.fps)),
             )?;
             writer.flush()
         })();
@@ -134,7 +141,7 @@ fn probe(
 fn probe_json(path: &Path) -> io::Result<Vec<u8>> {
     let output = bounded_output_with_timeout(Command::new("ffprobe").args([
         "-v", "error", "-show_entries",
-        "stream=index,codec_type,width,height,sample_aspect_ratio:stream_disposition=attached_pic:stream_tags=comment,title:stream_side_data=rotation:format=duration,format_name",
+        "stream=index,codec_type,width,height,sample_aspect_ratio,avg_frame_rate,r_frame_rate:stream_disposition=attached_pic:stream_tags=comment,title:stream_side_data=rotation:format=duration,format_name",
         "-of", "json",
     ]).arg(path), 64 * 1024, PROBE_TIMEOUT)?
         .filter(|output| output.status.success()).ok_or_else(|| io::Error::other("Unable to inspect media inside the sandbox"))?;
@@ -251,12 +258,25 @@ fn metadata(
     } else {
         (0, 0)
     };
+    // A cover or a looping GIF has no frame rate worth matching.
+    let native_fps = video
+        .filter(|video| !is_cover(video) && gif_period_us.is_none())
+        .map_or(media::FPS, native_rate);
+    let fps = if size.expanded {
+        media::frame_rate_for(width, height, native_fps, size.max_fps)
+    } else {
+        media::FPS
+    };
     let header = Header {
         width,
         height,
         audio: audio.is_some(),
         duration_us: (duration * 1_000_000.0).ceil() as u64,
-        start_tick,
+        start_tick: start_tick
+            .checked_mul(fps / media::FPS)
+            .ok_or_else(|| media::invalid("Invalid start tick"))?,
+        fps,
+        native_fps,
     }
     .validate(size, start_tick)?;
     Ok(Input {
@@ -266,6 +286,7 @@ fn metadata(
         cover: video.is_some_and(is_cover),
         gif_period_us,
         raw_video,
+        expanded: size.expanded,
     })
 }
 
@@ -403,6 +424,26 @@ pub(super) fn cover(input: &Path, size: u32) -> Result<Vec<u8>, String> {
     read_limited(file, MAX_OUTPUT_BYTES).map_err(|error| error.to_string())
 }
 
+/// Whichever of the two decoder rates the source is closer to playing at.
+fn native_rate(video: &serde_json::Value) -> u32 {
+    let rate = |field: &str| {
+        let (numerator, denominator) = video[field].as_str()?.split_once('/')?;
+        let (numerator, denominator) = (
+            numerator.parse::<f64>().ok()?,
+            denominator.parse::<f64>().ok()?,
+        );
+        (numerator > 0.0 && denominator > 0.0).then_some(numerator / denominator)
+    };
+    let fps = rate("avg_frame_rate")
+        .or_else(|| rate("r_frame_rate"))
+        .unwrap_or(f64::from(media::FPS));
+    if fps > f64::from(media::FPS) * 1.05 {
+        media::MAX_FPS
+    } else {
+        media::FPS
+    }
+}
+
 fn backends(devices: &[PathBuf], policy: MediaPreviewBackend) -> Vec<Backend> {
     let mut nodes: Vec<_> = devices
         .iter()
@@ -462,7 +503,7 @@ fn command(path: &Path, input: &Input, backend: &Backend, track: Track) -> Comma
         }
         Backend::Software => {}
     }
-    let start_us = media::timestamp(input.header.start_tick);
+    let start_us = media::timestamp_at(input.header.start_tick, input.header.fps);
     let offset_us = input
         .gif_period_us
         .map_or(start_us, |period| start_us % period.max(1));
@@ -470,8 +511,10 @@ fn command(path: &Path, input: &Input, backend: &Backend, track: Track) -> Comma
     if input.gif_period_us.is_some() {
         command.args(["-stream_loop", "-1"]);
     }
-    let remaining =
-        (input.header.duration_us - media::timestamp(input.header.start_tick)) as f64 / 1_000_000.0;
+    let remaining = (input.header.duration_us
+        - media::timestamp_at(input.header.start_tick, input.header.fps))
+        as f64
+        / 1_000_000.0;
     let cover = input.cover && matches!(track, Track::Video);
     // Input seeking can discard attached pictures and timestamp-less raw video.
     let seek = !cover && offset_us != 0;
@@ -489,11 +532,17 @@ fn command(path: &Path, input: &Input, backend: &Backend, track: Track) -> Comma
     }
     match track {
         Track::Video => {
+            let rate = format!("fps={}:start_time=0,", input.header.fps);
             let filter = format!(
-                "{}scale={}:{}:flags=fast_bilinear,setsar=1,format=rgba",
-                if cover { "" } else { "fps=30:start_time=0," },
+                "{}scale={}:{}:flags={},setsar=1,format=rgba",
+                if cover { "" } else { &rate },
                 input.header.width,
-                input.header.height
+                input.header.height,
+                if input.expanded {
+                    "bilinear"
+                } else {
+                    "fast_bilinear"
+                }
             );
             command
                 .arg("-map")
@@ -556,11 +605,17 @@ struct RawDecoder {
     children: Vec<Child>,
     video: Option<ChildStdout>,
     audio: Option<ChildStdout>,
+    /// The last picture written, repeated if the video ends before the audio.
     last_pixels: Vec<u8>,
+    /// A buffer to read the next picture into, so a frame costs no copy.
+    spare: Vec<u8>,
     video_ended: bool,
     audio_tick: u32,
     audio_end: Option<u32>,
     decoded_video: bool,
+    audio_bytes: usize,
+    /// How many ticks the audio runs ahead of the video in the records.
+    audio_lead: u32,
 }
 
 impl RawDecoder {
@@ -573,7 +628,10 @@ impl RawDecoder {
             audio_tick: input.header.start_tick,
             audio_end: input.audio.is_none().then_some(input.header.start_tick),
             decoded_video: false,
+            audio_bytes: input.header.audio_bytes(),
+            audio_lead: input.header.audio_lead_ticks(),
             last_pixels: vec![0; input.header.video_bytes()],
+            spare: Vec::new(),
         };
         for (present, track, backend) in [
             (input.video.is_some(), Track::Video, backend),
@@ -605,8 +663,16 @@ impl RawDecoder {
         Ok(true)
     }
 
+    /// Hands back the pixels of the frame that was just written.
+    fn keep(&mut self, pixels: Vec<u8>) {
+        self.spare = std::mem::replace(&mut self.last_pixels, pixels);
+    }
+
     fn frame(&mut self, tick: u32, deadline: Instant) -> io::Result<Option<Frame>> {
-        let mut pixels = self.last_pixels.clone();
+        let mut pixels = std::mem::take(&mut self.spare);
+        if pixels.len() != self.last_pixels.len() {
+            pixels = vec![0; self.last_pixels.len()];
+        }
         let mut video_bytes = 0;
         if let Some(video) = &self.video
             && !self.video_ended
@@ -618,8 +684,10 @@ impl RawDecoder {
                 return Err(media::invalid("Truncated decoded frame"));
             } else {
                 self.decoded_video = true;
-                self.last_pixels.clone_from(&pixels);
             }
+        }
+        if video_bytes == 0 {
+            pixels.copy_from_slice(&self.last_pixels);
         }
         if self.video.is_some() && !self.decoded_video {
             return Err(media::invalid("No decoded video frame"));
@@ -629,16 +697,16 @@ impl RawDecoder {
             // The first record carries the whole lead, later ones a single block;
             // blocks past the end of the track stay silent.
             let wanted = tick
-                .saturating_add(media::AUDIO_LEAD_TICKS + 1)
+                .saturating_add(self.audio_lead + 1)
                 .saturating_sub(self.audio_tick);
-            samples = vec![0; wanted as usize * AUDIO_BYTES];
-            for block in samples.chunks_mut(AUDIO_BYTES) {
+            samples = vec![0; wanted as usize * self.audio_bytes];
+            for block in samples.chunks_mut(self.audio_bytes) {
                 if self.audio_end.is_none() {
                     let read = read_chunk(audio, block, deadline)?;
                     if read % 4 != 0 {
                         return Err(media::invalid("Truncated PCM sample"));
                     }
-                    if read < AUDIO_BYTES {
+                    if read < self.audio_bytes {
                         self.audio_end = Some(self.audio_tick.saturating_add(u32::from(read > 0)));
                     }
                 }

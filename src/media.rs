@@ -8,33 +8,66 @@ use std::{
 
 use crate::{sandbox::Cancellation, services::MediaPreviewSize};
 
+/// Ticks per second of the seek grid: where a decode starts, and where decoders
+/// of different frame rates line up. The drawer decodes at this rate as well.
 pub(crate) const FPS: u32 = 30;
-// The terminal tick must fit the wire format; this also denotes unknown duration.
-pub(crate) const MAX_DURATION_US: u64 = u32::MAX as u64 * 1_000_000 / FPS as u64;
+/// The fastest rate a decoder produces. Both rates divide a second of 48 kHz
+/// audio evenly, and every 30 fps tick is a whole number of 60 fps ticks.
+pub(crate) const MAX_FPS: u32 = 60;
+// The terminal tick must fit the wire format at any rate; this also denotes unknown duration.
+pub(crate) const MAX_DURATION_US: u64 = u32::MAX as u64 * 1_000_000 / MAX_FPS as u64;
 pub(crate) const SAMPLE_RATE: u64 = 48_000;
-pub(crate) const AUDIO_BYTES: usize = 6_400;
+const AUDIO_BYTES_PER_SECOND: usize = SAMPLE_RATE as usize * 4;
 // Audio runs this many ticks ahead of video inside the records, so a sink's
 // buffer and device delay are covered by PCM rather than by pinned frames.
 pub(crate) const AUDIO_LEAD_TICKS: u32 = 60;
 pub(crate) const STARTUP_TIMEOUT: Duration = Duration::from_secs(22);
 pub(crate) const FRAME_TIMEOUT: Duration = Duration::from_secs(8);
-pub(crate) const HEADER_BYTES: usize = 40;
-const MAGIC: &[u8; 8] = b"STRRAW01";
+pub(crate) const HEADER_BYTES: usize = 48;
+const MAGIC: &[u8; 8] = b"STRRAW02";
 
 pub(crate) mod peaks;
 
+/// A tick on the seek grid, in microseconds.
 pub(crate) fn timestamp(tick: u32) -> u64 {
-    u64::from(tick) * 1_000_000 / u64::from(FPS)
+    timestamp_at(tick, FPS)
+}
+
+/// A tick of a decoder running at `fps`, in microseconds.
+pub(crate) fn timestamp_at(tick: u32, fps: u32) -> u64 {
+    u64::from(tick) * 1_000_000 / u64::from(fps)
+}
+
+/// The audio sample, at 48 kHz, that a tick of a decoder running at `fps` starts at.
+pub(crate) fn samples_at(tick: u32, fps: u32) -> u64 {
+    u64::from(tick) * SAMPLE_RATE / u64::from(fps)
+}
+
+pub(crate) fn is_frame_rate(fps: u32) -> bool {
+    fps == FPS || fps == MAX_FPS
+}
+
+/// Above this many pixels a frame is too large to carry through the decoder
+/// pipe at 60 a second, so the decoder stays at the seek-grid rate: resolution
+/// comes before frame rate.
+pub(crate) const FAST_FRAME_PIXELS: u64 = 2560 * 1440;
+
+/// The rate to decode a `width` x `height` frame at: the source's own, as far as
+/// the screen shows it and the pipe carries it.
+pub(crate) fn frame_rate_for(width: u32, height: u32, native_fps: u32, max_fps: u32) -> u32 {
+    if u64::from(width) * u64::from(height) > FAST_FRAME_PIXELS {
+        FPS
+    } else {
+        native_fps.min(max_fps).max(FPS)
+    }
 }
 
 /// PCM bytes a frame record carries; the first record also holds the lead.
 pub(crate) fn audio_bytes(header: Header, tick: u32) -> usize {
-    if !header.audio {
-        0
-    } else if tick == header.start_tick {
-        AUDIO_BYTES * (AUDIO_LEAD_TICKS as usize + 1)
+    if tick == header.start_tick {
+        header.audio_bytes() * (header.audio_lead_ticks() as usize + 1)
     } else {
-        AUDIO_BYTES
+        header.audio_bytes()
     }
 }
 
@@ -52,7 +85,12 @@ pub(crate) struct Header {
     pub height: u32,
     pub audio: bool,
     pub duration_us: u64,
+    /// In ticks of this decoder's own rate.
     pub start_tick: u32,
+    /// Frames per second this decoder produces: one frame per tick.
+    pub fps: u32,
+    /// The rate the source itself plays at, rounded to one of the two.
+    pub native_fps: u32,
 }
 
 impl Header {
@@ -60,20 +98,41 @@ impl Header {
         self.width as usize * self.height as usize * 4
     }
 
+    pub fn audio_bytes(self) -> usize {
+        if self.audio {
+            AUDIO_BYTES_PER_SECOND / self.fps.max(1) as usize
+        } else {
+            0
+        }
+    }
+
+    /// How many of this decoder's ticks audio runs ahead of video: two seconds.
+    pub fn audio_lead_ticks(self) -> u32 {
+        AUDIO_LEAD_TICKS * self.fps / FPS
+    }
+
     pub fn ticks(self) -> u32 {
+        (self.duration_us * u64::from(self.fps)).div_ceil(1_000_000) as u32
+    }
+
+    /// The whole duration in ticks of the seek grid.
+    pub fn seek_ticks(self) -> u32 {
         (self.duration_us * u64::from(FPS)).div_ceil(1_000_000) as u32
     }
 
     pub fn validate(self, size: MediaPreviewSize, start_tick: u32) -> io::Result<Self> {
         if self.width > size.width as u32
             || self.height > size.height as u32
-            || self.width > MediaPreviewSize::MAX_EDGE as u32
-            || self.height > MediaPreviewSize::MAX_EDGE as u32
+            || self.width > MediaPreviewSize::MAX_EXPANDED_EDGE as u32
+            || self.height > MediaPreviewSize::MAX_EXPANDED_EDGE as u32
             || (self.width == 0) != (self.height == 0)
             || (self.width == 0 && !self.audio)
             || self.duration_us == 0
             || self.duration_us > MAX_DURATION_US
-            || self.start_tick != start_tick
+            || !is_frame_rate(self.fps)
+            || !is_frame_rate(self.native_fps)
+            || self.fps > frame_rate_for(self.width, self.height, self.native_fps, size.max_fps)
+            || start_tick.checked_mul(self.fps / FPS) != Some(self.start_tick)
             || self.start_tick >= self.ticks()
         {
             return Err(invalid("Invalid decoded-media header"));
@@ -88,7 +147,7 @@ impl Header {
     ) -> io::Result<Self> {
         let mut bytes = [0; HEADER_BYTES];
         reader.read_exact(&mut bytes)?;
-        if &bytes[..8] != MAGIC || u32_at(&bytes, 20) > 1 || u32_at(&bytes, 36) != 0 {
+        if &bytes[..8] != MAGIC || u32_at(&bytes, 20) > 1 || u32_at(&bytes, 44) != 0 {
             return Err(invalid("Unknown decoded-media format"));
         }
         let header = Self {
@@ -97,6 +156,8 @@ impl Header {
             audio: u32_at(&bytes, 20) == 1,
             duration_us: u64_at(&bytes, 24),
             start_tick: u32_at(&bytes, 32),
+            fps: u32_at(&bytes, 36),
+            native_fps: u32_at(&bytes, 40),
         }
         .validate(size, start_tick)?;
         if header.width.checked_mul(4) != Some(u32_at(&bytes, 16)) {
@@ -117,6 +178,8 @@ impl Header {
         }
         writer.write_all(&self.duration_us.to_le_bytes())?;
         writer.write_all(&self.start_tick.to_le_bytes())?;
+        writer.write_all(&self.fps.to_le_bytes())?;
+        writer.write_all(&self.native_fps.to_le_bytes())?;
         writer.write_all(&0_u32.to_le_bytes())
     }
 }
@@ -129,12 +192,13 @@ pub(crate) struct Frame {
 }
 
 impl Frame {
-    pub fn write(&self, writer: &mut impl Write) -> io::Result<()> {
+    /// `fps` is the rate of the decoder the frame's tick counts in.
+    pub fn write(&self, writer: &mut impl Write, fps: u32) -> io::Result<()> {
         write_record(
             writer,
             1,
             self.tick,
-            timestamp(self.tick),
+            timestamp_at(self.tick, fps),
             self.pixels.len(),
             self.samples.len(),
         )?;
@@ -197,9 +261,9 @@ impl Decoder {
             if video != 0
                 || audio != 0
                 || tick == self.header.start_tick
-                || pts <= timestamp(tick - 1)
+                || pts <= timestamp_at(tick - 1, self.header.fps)
                 || pts > self.header.duration_us
-                || pts > timestamp(tick)
+                || pts > timestamp_at(tick, self.header.fps)
             {
                 return Err(invalid("Invalid decoded-media end"));
             }
@@ -208,7 +272,7 @@ impl Decoder {
         }
         if kind != 1
             || tick >= self.header.ticks()
-            || pts != timestamp(tick)
+            || pts != timestamp_at(tick, self.header.fps)
             || video != self.header.video_bytes()
             || audio != audio_bytes(self.header, tick)
         {

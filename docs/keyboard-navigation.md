@@ -103,6 +103,68 @@ In the browser and file chooser, **Down** from the Ctrl+F input focuses the sele
 
 While the input is focused, Space types into the query if no result is selected. **Shift+Space** inserts a space there even with a result selected. Space opens a selected folder in every view without opening or loading the preview pane; unsupported files do not open a preview.
 
+## Expanded preview
+
+**Shift+Space** enlarges the quick preview; press it again, or **Esc**, to return to the small
+preview. On a selected file with the preview closed, it opens the preview straight into the expanded
+view. The header's expand button does the same with the pointer. The main window's preview expands; the
+file chooser keeps the small preview.
+
+The expanded view is the same live preview as the small one, moved rather than rebuilt, so nothing
+reloads or restarts: a playing video keeps its position and play state, a document keeps its place, and an
+image or PDF keeps its zoom. **Settings → General → Expanded preview → Expanded preview style** picks where
+it goes:
+
+- **Overlay** (default): a large layer over Strata's own window. The preview grows out of the drawer and
+  shrinks back into it, and switches instantly with **Reduce motion**.
+- **Fullscreen window**: a separate window opened fullscreen on the main window's monitor. Its opening
+  and closing animation belongs to the compositor. Closing the window, or closing the main window, ends it.
+
+Shift+Space only expands while the file list or the preview has the keys. In the filter field, the
+location bar, a rename, or any other text field it still types a space, and on a folder with nothing to
+preview it does nothing.
+
+While the view is expanded it owns the keyboard, and keys meant for the hidden listing are ignored:
+
+| Key | Action |
+| --- | --- |
+| **Shift+Space**, **Esc** | Back to the small preview (a second **Esc** closes it) |
+| **Space** | Play or pause video and audio; otherwise close the preview |
+| **← ↑** / **→ ↓** | Move to the previous / next file that can be previewed. The view stays open and shows the new file; folders and unsupported files are skipped, and the cursor stops at either end |
+| **Shift+arrows** | Control the preview (below) |
+| **+** / **−**, **0** | Zoom an image or a PDF in or out (images up to 8×, PDFs up to 4×), or back to fit |
+| **Page Up/Down, Home, End** | Scroll a document |
+| **M** | Mute or unmute video and audio |
+
+**Settings → General → Expanded preview → Hold Shift to control the preview** is on by default. Turn it off
+to swap the two roles: plain arrows control the preview and Shift+arrows change file. Controlling the preview means:
+
+- Video and audio: **←** / **→** seek −5 s / +5 s, **↑** / **↓** seek +60 s / −60 s.
+- PDFs: **↑** / **↓** scroll, **←** / **→** turn to the previous / next page, or pan sideways when the page is zoomed wider than the view.
+- Other documents: **↑** / **↓** scroll, **←** / **→** scroll a page, or pan sideways when the text is wider than the view.
+- Images: pan in all four directions while zoomed in. An image that already fits has nothing to move, so
+  its control arrows change file too.
+- Archives: move through the tree, as in the small preview.
+
+**Ctrl+wheel** zooms an image or PDF at the pointer, and a zoomed image can be dragged. The small preview
+never zooms images: an image zoomed in the expanded view shows whole in the drawer and returns to the
+same zoom and place when expanded again. A scrolled document keeps its place when its text reflows to the
+new width.
+
+Expanding also sharpens the content in place, without touching zoom, scroll or play state: images are
+re-rendered up to 2,880 pixels on the longest edge, PDF pages up to 2,400 pixels wide, and a playing
+video's decoder switches to the larger size in the background without pausing. The decode follows the
+size of the expanded view, including when the window is resized, up to the screen's size (at most 3,840 pixels
+on the longest edge) and never beyond the video's own size; the small preview stays at 1,280. A video above
+30 fps plays at 60 fps in the expanded view when the screen refreshes at least that fast, unless its frames are
+larger than 2560 x 1440, which keep their resolution at 30 fps.
+
+**F1**, **Ctrl+K** and the other window commands keep working over the overlay. The fullscreen window
+takes the keys above, but the main window's other commands (including text size) are unavailable while it is open.
+
+While filter or search results replace the listing, arrows step one result at a time and a folder
+result shows an empty preview until the next step.
+
 ## Navigating an archive preview
 
 Quick Look on a local ZIP, 7z, TAR, or TAR.GZ opens the archive's member tree

@@ -15,6 +15,7 @@ use crate::services::{
 mod audio_tracks;
 mod context_menus;
 mod escape_precedence;
+mod expanded_preview;
 mod file_commands;
 mod file_verbs;
 mod folder_jump;

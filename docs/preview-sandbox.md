@@ -240,6 +240,10 @@ Space preview never queues behind a scrolled directory's thumbnail flood. Both
 pools share the launcher thread, idle retirement, per-job isolation, and cache
 machinery; the cache keys results by source version *and* operation so a
 256-pixel thumbnail can never satisfy an 800-pixel preview of the same file.
+The [expanded preview](keyboard-navigation.md#expanded-preview) adds one more
+operation, `preview-image-expanded`, which renders the longest edge up to 2,880
+pixels (native size for smaller images). It has its own output limit and cache
+key, and its result is never stored as a thumbnail.
 Each preview still runs in a freshly forked, Landlock/seccomp-confined decoder
 with per-job resource limits — only the supervisor process is reused.
 
@@ -404,8 +408,8 @@ deadlocks with sparse/VFR video or attached cover art. Both processes remain in
 one sandbox, with access to the same single input. Cover art in a video preview
 is decoded once in software and retained alongside audio; audio files play
 through an audio-only session that never decodes artwork into frames.
-Video timing is normalized **inside the sandbox** to 30 fps, including holding
-VFR/GIF frames. Audio is 48 kHz, stereo, interleaved signed 16-bit little-endian
+Video timing is normalized **inside the sandbox** to 30 fps (the expanded preview
+may use 60, see below), including holding VFR/GIF frames. Audio is 48 kHz, stereo, interleaved signed 16-bit little-endian
 PCM. Resampling preserves gaps/offsets relative to the common source timeline.
 
 Previews play **the entire source**, without a 30-second playback cap. Seeking
@@ -419,16 +423,46 @@ animation before looping.
 Files without a reported duration play until decoded EOF. Their timeline remains
 unknown and seeking is disabled until the actual end is established; pause/idle
 resume still retains the playback position. The wire's representable terminal
-tick (about 4.5 years at 30 fps) is an arithmetic ceiling and unknown-duration
+tick (about 2.3 years at 60 fps) is an arithmetic ceiling and unknown-duration
 sentinel, not a practical preview-length policy.
 
-The decode rectangle follows the pane's logical size times display scale, capped
-at 1280 pixels on either axis. Frames preserve display aspect ratio, including
+The decode rectangle follows the pane's logical size times display scale. The
+drawer is capped at 1280 pixels on either axis. The expanded preview has no such
+cap: it decodes as large as it is shown and follows the window as it is resized,
+up to a ceiling of 3840 pixels on an edge and about 9.2 megapixels, and scales
+with the slower, sharper `bilinear` filter instead of `fast_bilinear`. Frames
+preserve display aspect ratio, including
 sample aspect ratio/right-angle rotation, without unnecessarily enlarging small
 sources. Resizes settle for 250 ms before restarting at the current playback
 position; the previous texture remains visible. Changes that would not materially
 change the fitted frame size do not restart decoding. A paused resize/seek stays
-paused. Mute/volume preferences initialize and update every player's raw-audio
+paused.
+
+A resize that settles while a stream is **playing** does not restart it. A second
+decoder starts at the new size a little ahead of the playhead (about 1.2× the
+first decoder's measured start-up time, between 250 ms and 1.5 s) and decodes in
+the background while the first keeps playing. When the second reaches the frame
+after the last one the first delivered, the stream switches: earlier frames and
+audio came from the first decoder, later ones from the second, and the audio
+output and playback clock carry on unchanged. The switching frame's first 10 ms
+of audio are cross-faded, because decoders that start from a seek can land a few
+samples apart (measured: AAC is sample-exact, Opus is 16–32 samples off, which
+is an audible click without the fade). If no worker is free the first decoder
+keeps its size and the switch is tried again every 250 ms; a second decoder that fails, ends early, or does not line
+up within 4 s is dropped; seeking cancels it. This is how the expanded preview
+changes a playing video's size without a visible stall, so a large display shows the
+video at its real resolution (never more than the source has).
+
+The expanded preview also decodes at the source's own frame rate when it is above
+30 fps, as 60 fps, so a 60 fps recording is not thinned to half its frames. The rate
+is capped by the screen's refresh rate (30 on a screen slower than about 55 Hz) and
+by a frame-size budget: above 2560 x 1440 pixels a frame is too large to carry
+through the decoder pipe at 60 a second, so a larger picture stays at 30 fps and
+keeps its resolution. The drawer, covers and GIFs always decode at 30. Both rates
+count ticks on the same 30 fps seek grid, which is where a second decoder starts
+and where the two meet, so a change of frame rate is handed over like a change of
+size; the switching frame is the second decoder's first, with the first 10 ms of
+its audio cross-faded from the first decoder's. Mute/volume preferences initialize and update every player's raw-audio
 output live; backend preference changes apply on the next preview request.
 
 ## Audio previews
@@ -488,9 +522,10 @@ view without disabling track navigation. Tracks never advance automatically.
 
 ## Wire validation and budgets
 
-The versioned `STRRAW01` little-endian protocol has a 40-byte header: magic,
+The versioned `STRRAW02` little-endian protocol has a 48-byte header: magic,
 width, height, exact RGBA stride, audio-present flag, duration in microseconds,
-starting tick, and a zero reserved field. Each 24-byte record contains its type,
+starting tick, the decoder's frame rate, the source's own frame rate (each 30
+or 60), and a zero reserved field. Each 24-byte record contains its type,
 tick, timestamp, and video/audio lengths. Frame records are followed by exactly
 those payloads; an explicit end record has no payload. EOF alone is not success.
 
@@ -500,12 +535,19 @@ The parent independently checks:
 - positive duration within the `u32` terminal-tick range and the requested start
   tick; the maximum representable duration denotes an unknown source duration;
 - strictly consecutive ticks below the declared duration, exact
-  `floor(tick * 1,000,000 / 30)` timestamps, and an end tick that cannot overflow;
-- video length exactly `width * height * 4`, at most 6,553,600 bytes;
-- PCM length exactly 6,400 bytes per tick (1,600 stereo samples); the first
-  record of a generation carries 61 blocks because audio runs 60 ticks (2 s)
-  ahead of video, and the last block is truncated to the advertised content
-  duration before audio output;
+  `floor(tick * 1,000,000 / fps)` timestamps, and an end tick that cannot overflow;
+- a frame rate the request allowed: 30, or 60 only for an expanded request from a
+  screen that refreshes at least that fast and only while the frame has no more
+  than 3,686,400 pixels (2560 x 1440), so resolution comes before frame rate;
+- a start tick equal to the requested one on the 30 fps seek grid, times the
+  decoder's rate over 30;
+- video length exactly `width * height * 4`, at most 6,553,600 bytes (36,864,000 for
+  an expanded request);
+- PCM length exactly 192,000 / fps bytes per tick (1,600 stereo samples at 30 fps,
+  800 at 60); the first record of a generation carries one block per tick of the
+  2-second audio lead plus its own (61 blocks at 30 fps, 121 at 60) because audio
+  runs that far ahead of video, and the last block is truncated to the advertised
+  content duration before audio output;
 - end timestamp/lengths, no trailing output, and successful helper exit.
 
 Lengths are checked **before allocation**. Helper buffers cannot mutate textures:
@@ -514,8 +556,8 @@ last reference is released. There is no shared writable memory.
 
 The worker-to-GTK queue holds three records, the presentation queue three frames,
 and a worker may hold one pending frame. Including the displayed CPU texture,
-that is at most eight directly application-held frames (50 MiB at the maximum
-square size), plus small audio buffers and bounded kernel pipes. Audio never
+that is at most eight directly application-held frames (50 MiB at the drawer's
+maximum square size, about 280 MiB for the largest expanded frames), plus small audio buffers and bounded kernel pipes. Audio never
 pins frames to stay ahead of a slow sink: the first record of a generation
 carries a 2-second PCM lead and later records run that far ahead of their frame,
 so a sink that only starts once its own buffer fills, or whose device delay is

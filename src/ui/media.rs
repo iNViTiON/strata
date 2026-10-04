@@ -19,9 +19,11 @@ use crate::{
 mod audio;
 #[cfg(debug_assertions)]
 mod diagnostics;
+mod handover;
 #[cfg(test)]
 mod tests;
 use audio::PcmOutput;
+use handover::Handover;
 
 const PAUSED_IDLE: Duration = Duration::from_secs(30);
 const RESIZE_DELAY: Duration = Duration::from_millis(250);
@@ -69,6 +71,16 @@ pub(crate) fn recall_media_position(path: &Path) -> Option<u64> {
     })
 }
 
+/// A decoded frame with the size and frame rate of the decoder it came from,
+/// since a handover changes both while older frames are still queued.
+pub(super) struct QueuedFrame {
+    frame: Frame,
+    width: u32,
+    height: u32,
+    /// The rate the frame's tick counts in, which a handover can change.
+    fps: u32,
+}
+
 #[cfg(test)]
 type TestLoader = std::rc::Rc<dyn Fn(SandboxedMedia, u32) -> Result<Session, String>>;
 
@@ -88,7 +100,14 @@ mod imp {
         pub(super) header: Cell<Option<Header>>,
         pub(super) loaded_size: Cell<Option<MediaPreviewSize>>,
         pub(super) texture: RefCell<Option<gdk::Texture>>,
-        pub(super) frames: RefCell<VecDeque<Frame>>,
+        pub(super) frames: RefCell<VecDeque<QueuedFrame>>,
+        pub(super) handover: RefCell<Option<Handover>>,
+        /// The point in the media, as a count of 48 kHz audio samples, that the
+        /// playback clock and the audio timeline count from. Samples keep it
+        /// exact: the audio output checks timestamps to the sample.
+        pub(super) origin_samples: Cell<u64>,
+        pub(super) last_tick: Cell<Option<u32>>,
+        pub(super) start_latency: Cell<Option<Duration>>,
         pub(super) audio: RefCell<Option<PcmOutput>>,
         pub(super) timer: RefCell<Option<glib::SourceId>>,
         pub(super) closed: Cell<bool>,
@@ -107,7 +126,6 @@ mod imp {
         pub(super) recoveries: Cell<u32>,
         pub(super) audio_stuck_since: Cell<Option<Instant>>,
         pub(super) audio_anchored: Cell<bool>,
-        pub(super) audio_chunks: Cell<u32>,
         pub(super) restore: Cell<Option<u64>>,
         pub(super) history: RefCell<Option<PcmHistory>>,
     }
@@ -324,6 +342,7 @@ impl DecodedMedia {
             timer.remove();
         }
         imp.session.borrow_mut().take();
+        imp.handover.borrow_mut().take();
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         imp.texture.borrow_mut().take();
@@ -355,6 +374,8 @@ impl DecodedMedia {
         if let Some(session) = imp.session.borrow().as_ref() {
             session.cancel();
         }
+        imp.handover.borrow_mut().take();
+        imp.last_tick.set(None);
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         if let Some(history) = imp.history.borrow_mut().as_mut() {
@@ -367,7 +388,6 @@ impl DecodedMedia {
         imp.clock_base.set(0);
         imp.audio_stuck_since.set(None);
         imp.audio_anchored.set(false);
-        imp.audio_chunks.set(0);
         imp.first_frame.set(false);
         imp.end.set(None);
         imp.dormant.set(false);
@@ -379,6 +399,7 @@ impl DecodedMedia {
     fn fail(&self, message: &str) {
         let imp = self.imp();
         imp.session.borrow_mut().take();
+        imp.handover.borrow_mut().take();
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         if self.is_seeking() {
@@ -449,9 +470,14 @@ impl DecodedMedia {
                 }
             }
         }
+        // Without audio nothing else anchors the clock, so a pause would lose the elapsed time.
+        if imp.audio.borrow().is_none() {
+            imp.clock_base.set(relative);
+            imp.clock.set(self.is_playing().then(Instant::now));
+        }
         if let Some(header) = imp.header.get() {
-            let position = (media::timestamp(header.start_tick) + relative)
-                .min(imp.end.get().unwrap_or(header.duration_us));
+            let position =
+                (self.origin_us() + relative).min(imp.end.get().unwrap_or(header.duration_us));
             if position != imp.position.get() {
                 imp.last_progress.set(Some(Instant::now()));
                 // Wall-clock drift over stuck audio must not reset the strike cap.
@@ -519,7 +545,7 @@ impl DecodedMedia {
             .is_some_and(|time| time.elapsed() >= RESIZE_DELAY)
         {
             imp.resized.set(None);
-            if !imp.dormant.get() && self.needs_resize() {
+            if !imp.dormant.get() && self.needs_resize() && !self.begin_handover() {
                 self.capture_position();
                 self.restart_at(imp.position.get());
             }
@@ -610,6 +636,8 @@ impl DecodedMedia {
                     let audio = header.audio.then(|| self.pcm_output()).transpose()?;
                     imp.audio.replace(audio);
                     imp.header.set(Some(header));
+                    imp.origin_samples
+                        .set(media::samples_at(header.start_tick, header.fps));
                     if imp.source.borrow().as_ref().map(|source| source.size)
                         != imp.loaded_size.get()
                     {
@@ -659,6 +687,7 @@ impl DecodedMedia {
                 None => break,
             }
         }
+        self.pump_handover()?;
         // Trim behind the sink itself, not the extrapolated playhead: a stalled
         // sink resumes from its last position and still needs those samples.
         if let Some(history) = imp.history.borrow_mut().as_mut() {
@@ -696,22 +725,27 @@ impl DecodedMedia {
                     false
                 }
             });
+            // Only the newest due frame is shown; a texture for each frame that
+            // was already late would cost a large upload for nothing.
+            let mut due = None;
             loop {
                 let frame = {
                     let mut frames = imp.frames.borrow_mut();
-                    if frames
-                        .front()
-                        .is_some_and(|frame| media::timestamp(frame.tick) <= imp.position.get())
-                    {
+                    if frames.front().is_some_and(|frame| {
+                        media::timestamp_at(frame.frame.tick, frame.fps) <= imp.position.get()
+                    }) {
                         frames.pop_front()
                     } else {
                         None
                     }
                 };
-                let Some(frame) = frame else {
+                let Some(queued) = frame else {
                     break;
                 };
-                self.present(frame);
+                due = Some(queued);
+            }
+            if let Some(queued) = due {
+                self.present(queued.frame, queued.width, queued.height);
             }
             self.update(imp.position.get() as i64);
             if ended {
@@ -733,17 +767,40 @@ impl DecodedMedia {
         Ok(())
     }
 
+    /// Where a frame's audio belongs on the playback timeline. It counts from
+    /// the point the clock started at, which a handover to a new decoder keeps.
+    fn audio_timestamp(&self, tick: u32, fps: u32) -> u64 {
+        let samples = media::samples_at(tick, fps).saturating_sub(self.imp().origin_samples.get());
+        samples * 1_000_000 / media::SAMPLE_RATE
+    }
+
+    fn origin_us(&self) -> u64 {
+        self.imp().origin_samples.get() * 1_000_000 / media::SAMPLE_RATE
+    }
+
     /// Takes one decoded frame from the active session: audio goes to the
     /// output, the picture to the presentation queue.
     fn accept_frame(&self, mut frame: Frame) -> Result<(), String> {
         let imp = self.imp();
         let header = imp.header.get().ok_or("Missing media header")?;
+        imp.last_tick.set(Some(frame.tick));
         if let Some(audio) = imp.audio.borrow().as_ref() {
-            // Blocks belong to successive audio ticks, running ahead of the frame.
-            for block in std::mem::take(&mut frame.samples).chunks(media::AUDIO_BYTES) {
-                let chunk = imp.audio_chunks.get();
-                let tick = header.start_tick.saturating_add(chunk);
-                let samples_left = header.duration_us.saturating_sub(media::timestamp(tick))
+            // Audio runs a lead ahead of the frame: a record's last block belongs to
+            // `tick + lead`, and a first record carries every block back to its own tick.
+            let block_bytes = header.audio_bytes();
+            let blocks = frame.samples.len().div_ceil(block_bytes.max(1)) as u32;
+            let first = frame
+                .tick
+                .saturating_add(header.audio_lead_ticks() + 1)
+                .saturating_sub(blocks);
+            for (index, block) in std::mem::take(&mut frame.samples)
+                .chunks(block_bytes)
+                .enumerate()
+            {
+                let tick = first + index as u32;
+                let samples_left = header
+                    .duration_us
+                    .saturating_sub(media::timestamp_at(tick, header.fps))
                     * media::SAMPLE_RATE
                     / 1_000_000;
                 let block = &block[..samples_left.min(block.len() as u64 / 4) as usize * 4];
@@ -751,40 +808,42 @@ impl DecodedMedia {
                     if let Some(history) = imp.history.borrow_mut().as_mut() {
                         history.push(block);
                     }
-                    audio.push(block.to_vec(), media::timestamp(chunk))?;
-                }
-                imp.audio_chunks.set(chunk + 1);
-            }
-        }
-        if !imp.first_frame.get() {
-            let latency_ms = imp
-                .starting
-                .get()
-                .map_or(0, |time| time.elapsed().as_millis()) as u64;
-            imp.first_frame.set(true);
-            imp.starting.set(None);
-            imp.last_progress.set(Some(Instant::now()));
-            if self.is_playing() {
-                imp.clock.set(self.wall_clock_allowed().then(Instant::now));
-                if let Some(audio) = imp.audio.borrow().as_ref() {
-                    audio.play()?;
+                    audio.push(block.to_vec(), self.audio_timestamp(tick, header.fps))?;
                 }
             }
-            self.present(frame);
-            tracing::debug!(
-                latency_ms,
-                position_us = media::timestamp(header.start_tick),
-                width = header.width,
-                height = header.height,
-                "sandboxed media first frame"
-            );
-            if self.is_seeking() {
-                self.seek_success();
-            }
-            self.update(imp.position.get() as i64);
-        } else {
-            imp.frames.borrow_mut().push_back(frame);
         }
+        if imp.first_frame.get() {
+            imp.frames.borrow_mut().push_back(QueuedFrame {
+                frame,
+                width: header.width,
+                height: header.height,
+                fps: header.fps,
+            });
+            return Ok(());
+        }
+        let latency = imp.starting.get().map(|time| time.elapsed());
+        imp.first_frame.set(true);
+        imp.starting.set(None);
+        imp.start_latency.set(latency);
+        imp.last_progress.set(Some(Instant::now()));
+        if self.is_playing() {
+            imp.clock.set(self.wall_clock_allowed().then(Instant::now));
+            if let Some(audio) = imp.audio.borrow().as_ref() {
+                audio.play()?;
+            }
+        }
+        self.present(frame, header.width, header.height);
+        tracing::debug!(
+            latency_ms = latency.map_or(0, |latency| latency.as_millis() as u64),
+            position_us = media::timestamp_at(header.start_tick, header.fps),
+            width = header.width,
+            height = header.height,
+            "sandboxed media first frame"
+        );
+        if self.is_seeking() {
+            self.seek_success();
+        }
+        self.update(imp.position.get() as i64);
         Ok(())
     }
 
@@ -806,23 +865,22 @@ impl DecodedMedia {
         }
         (f64::from(header.width) * (scale - 1.0)).abs() >= 2.0
             || (f64::from(header.height) * (scale - 1.0)).abs() >= 2.0
+            || header.fps != wanted_fps(size, header)
     }
 
-    fn present(&self, frame: Frame) {
+    fn present(&self, frame: Frame, width: u32, height: u32) {
         let imp = self.imp();
-        if let Some(header) = imp.header.get()
-            && header.width > 0
-        {
+        if width > 0 {
             #[cfg(debug_assertions)]
             let pixels = diagnostics::Pixels::new(frame.pixels);
             #[cfg(not(debug_assertions))]
             let pixels = frame.pixels;
             let texture = gdk::MemoryTexture::new(
-                header.width as i32,
-                header.height as i32,
+                width as i32,
+                height as i32,
                 gdk::MemoryFormat::R8g8b8a8,
                 &glib::Bytes::from_owned(pixels),
-                header.width as usize * 4,
+                width as usize * 4,
             )
             .upcast::<gdk::Texture>();
             let size_changed = imp.texture.borrow().as_ref().is_none_or(|old| {
@@ -889,5 +947,15 @@ impl PcmHistory {
             *target = *source;
         }
         true
+    }
+}
+
+/// The frame rate a request wants for a picture like `header`'s: the drawer's,
+/// or in the expanded view the source's own, as far as the screen shows it.
+fn wanted_fps(size: MediaPreviewSize, header: Header) -> u32 {
+    if size.expanded {
+        media::frame_rate_for(header.width, header.height, header.native_fps, size.max_fps)
+    } else {
+        media::FPS
     }
 }

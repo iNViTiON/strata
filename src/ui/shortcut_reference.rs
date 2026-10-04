@@ -107,6 +107,10 @@ fn default_sections(mode: BrowserMode) -> Vec<ReferenceSection> {
             title: "Preview media",
             rows: MEDIA.to_vec(),
         },
+        ReferenceSection {
+            title: "Expanded preview",
+            rows: EXPANDED.to_vec(),
+        },
     ]
 }
 
@@ -143,6 +147,12 @@ fn tenxer_sections(mode: BrowserMode, chooser: Option<ChooserScope>) -> Vec<Refe
             rows: MEDIA.to_vec(),
         },
     ]);
+    if chooser.is_none() {
+        sections.push(ReferenceSection {
+            title: "Expanded preview",
+            rows: EXPANDED.to_vec(),
+        });
+    }
     let mode_rows = tenxer_mode_rows(mode, chooser.is_some(), &sections);
     let mode_index = sections
         .iter()
@@ -590,6 +600,15 @@ fn tenxer_tools(mode: BrowserMode, chooser: bool) -> Vec<(&'static str, &'static
     ]);
     shortcuts
 }
+
+const EXPANDED: &[(&str, &str)] = &[
+    ("Shift+Space", "Expand or collapse the preview"),
+    ("← ↑ / ↓ →", "Previous / next file"),
+    ("Shift+← ↑ / ↓ →", "Seek, scroll, turn pages, or pan"),
+    ("+ / −", "Zoom an image or PDF; 0 fits"),
+    ("Space", "Play / pause, or close the preview"),
+    ("Escape", "Back to the small preview"),
+];
 
 const MEDIA: &[(&str, &str)] = &[
     ("Ctrl+Alt+Space", "Play / pause"),
