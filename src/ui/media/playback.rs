@@ -279,7 +279,12 @@ impl DecodedMedia {
         let header = imp.header.get().ok_or("Missing media header")?;
         imp.last_tick.set(Some(frame.tick));
         if let Some(audio) = imp.audio.borrow().as_ref() {
-            self.push_audio(audio, &header, std::mem::take(&mut frame.samples))?;
+            self.push_audio(
+                audio,
+                &header,
+                frame.tick,
+                std::mem::take(&mut frame.samples),
+            )?;
         }
         if imp.first_frame.get() {
             imp.frames.borrow_mut().push_back(QueuedFrame {
@@ -305,27 +310,34 @@ impl DecodedMedia {
         self.imp().origin_samples.get() * 1_000_000 / media::SAMPLE_RATE
     }
 
-    // Blocks belong to successive audio ticks, running ahead of the frame.
+    // Audio runs a lead ahead of the frame: a record's last block belongs to
+    // `tick + lead`, and a first record carries every block back to its own tick.
     fn push_audio(
         &self,
         audio: &PcmOutput,
         header: &Header,
+        frame_tick: u32,
         samples: Vec<u8>,
     ) -> Result<(), String> {
         let imp = self.imp();
-        // Each block is timed by the samples already pushed, which stays contiguous
-        // across a handover to a decoder with another frame rate.
-        for block in samples.chunks(header.audio_bytes()) {
-            let pushed = audio.pushed_frames();
-            let position_us = self.origin_us() + pushed * 1_000_000 / media::SAMPLE_RATE;
-            let samples_left =
-                header.duration_us.saturating_sub(position_us) * media::SAMPLE_RATE / 1_000_000;
+        let block_bytes = header.audio_bytes();
+        let blocks = samples.len().div_ceil(block_bytes.max(1)) as u32;
+        let first = frame_tick
+            .saturating_add(header.audio_lead_ticks() + 1)
+            .saturating_sub(blocks);
+        for (index, block) in samples.chunks(block_bytes).enumerate() {
+            let tick = first + index as u32;
+            let samples_left = header
+                .duration_us
+                .saturating_sub(media::timestamp_at(tick, header.fps))
+                * media::SAMPLE_RATE
+                / 1_000_000;
             let block = &block[..samples_left.min(block.len() as u64 / 4) as usize * 4];
             if !block.is_empty() {
                 if let Some(history) = imp.history.borrow_mut().as_mut() {
                     history.push(block);
                 }
-                audio.push(block.to_vec(), pushed * 1_000_000 / media::SAMPLE_RATE)?;
+                audio.push(block.to_vec(), self.audio_timestamp(tick, header.fps))?;
             }
         }
         Ok(())
