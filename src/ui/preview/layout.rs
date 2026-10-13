@@ -476,6 +476,7 @@ impl PreviewState {
     }
 
     pub(super) fn hide_panel(&self) {
+        self.collapse_now();
         self.finish_hide(self.hide_intent());
     }
 
@@ -556,6 +557,9 @@ impl PreviewState {
     }
 
     pub(super) fn sync_split(self: &Rc<Self>, split: &gtk::Paned) {
+        if self.expanded.is_active() {
+            return;
+        }
         let mut geometry = self.geometry(split);
         let reserved = self.reserves_column_space();
         let preview_present =

@@ -28,7 +28,7 @@ def _open_settings(strata, window):
 
 @pytest.mark.preferences(
     folder_peeking=False, type_to_search=False, single_click_previews=False,
-    columns_mirror_selection=False,
+    columns_mirror_selection=False, expanded_preview_shift_controls=False,
     filter_include_subfolders=False, open_folder_after_drop=False,
 )
 def test_preferences_sync_across_windows_and_restart(strata):
@@ -60,6 +60,7 @@ def test_preferences_sync_across_windows_and_restart(strata):
         ("Type to search", "type_to_search"),
         ("Single-click file previews", "single_click_previews"),
         ("Mirror columns selection", "columns_mirror_selection"),
+        ("Hold Shift to control the preview", "expanded_preview_shift_controls"),
         ("Include subfolders", "filter_include_subfolders"),
         ("Open folder after dropping files", "open_folder_after_drop"),
     ]:
@@ -84,7 +85,8 @@ def test_preferences_sync_across_windows_and_restart(strata):
     _open_settings(strata, strata.window)
     for label in [
         "Folder peeking", "Type to search", "Single-click file previews",
-        "Include subfolders", "Open folder after dropping files",
+        "Hold Shift to control the preview", "Include subfolders",
+        "Open folder after dropping files",
     ]:
         assert not _switch(strata.window, label).has_state("checked")
 

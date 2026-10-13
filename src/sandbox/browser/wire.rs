@@ -30,6 +30,7 @@ pub(crate) enum Operation {
     DocumentMathInline = 10,
     ThreeMfThumbnail = 11,
     FreeCadThumbnail = 12,
+    PreviewImageExpanded = 13,
 }
 
 impl Operation {
@@ -42,6 +43,7 @@ impl Operation {
             5 => Ok(Self::ImageMetadata),
             6 => Ok(Self::MediaMetadata),
             7 => Ok(Self::PreviewImage),
+            13 => Ok(Self::PreviewImageExpanded),
             8 => Ok(Self::DocumentMermaid),
             9 => Ok(Self::DocumentMath),
             10 => Ok(Self::DocumentMathInline),
