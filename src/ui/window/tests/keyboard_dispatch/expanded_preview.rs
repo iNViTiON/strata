@@ -198,6 +198,7 @@ fn drawer_of(preview: &PreviewDrawer) -> Option<gtk::Widget> {
         .pane_widget()
         .ancestor(gtk::Revealer::static_type())
         .and_then(|revealer| revealer.parent())
+        .and_then(|overlay| overlay.parent())
 }
 
 fn press_plain(expanded: &Expanded, key: Key) -> bool {

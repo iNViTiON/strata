@@ -809,8 +809,8 @@ fn shrinking_the_pane_keeps_the_decode_and_only_real_growth_restarts_it() {
             let position = media.timestamp().max(0) as u64;
             let restarted_at = media::timestamp(calls.borrow()[1]);
             assert!(
-                restarted_at <= position && position - restarted_at < 1_000_000,
-                "a real growth restarts near the current position ({restarted_at} vs {position})"
+                restarted_at.abs_diff(position) < 2_000_000,
+                "a real growth restarts near the current position, a playing stream a little ahead of it ({restarted_at} vs {position})"
             );
             media.close();
         },
@@ -1175,18 +1175,25 @@ fn audio_timestamps_stay_sample_exact_from_any_start_tick_and_across_a_rate_chan
 }
 
 #[test]
-fn shrinking_hands_over_too() {
-    crate::test_support::gtk_test("ui::media::tests::shrinking_hands_over_too", || {
-        let loads = Rc::new(Cell::new(0));
-        let media = playing(&loads, 0, None);
-        media.resize(MediaPreviewSize::new(640, 360));
-        spin_until("larger", || picture_size(&media) == (640, 360));
-        media.resize(MediaPreviewSize::new(320, 180));
-        spin_until("smaller again", || picture_size(&media) == (320, 180));
-        assert_eq!(loads.get(), 3);
-        assert!(media.is_playing());
-        assert!(media.error().is_none());
-    });
+fn leaving_the_expanded_view_hands_over_to_the_drawer_size() {
+    crate::test_support::gtk_test(
+        "ui::media::tests::leaving_the_expanded_view_hands_over_to_the_drawer_size",
+        || {
+            let loads = Rc::new(Cell::new(0));
+            let media = playing(&loads, 0, None);
+            media.resize(MediaPreviewSize::expanded(640, 360).for_refresh_rate(30_000));
+            spin_until("larger", || picture_size(&media) == (640, 360));
+            media.resize(MediaPreviewSize::new(320, 180));
+            spin_until("smaller again", || picture_size(&media) == (320, 180));
+            assert_eq!(loads.get(), 3);
+            assert!(media.is_playing());
+            assert!(media.error().is_none());
+
+            media.resize(MediaPreviewSize::new(200, 112));
+            spin_for(2 * RESIZE_DELAY.as_millis() as u64);
+            assert_eq!(loads.get(), 3, "shrinking the drawer keeps the decode");
+        },
+    );
 }
 
 #[test]
