@@ -97,6 +97,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
     saved.remove("folder_peeking");
     saved.remove("columns_show_sizes");
     saved.remove("language");
+    saved.remove("typing_mode");
     let restored: Preferences = saved.try_into().expect("backward-compatible preferences");
     assert_eq!(
         restored,
@@ -111,6 +112,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
             file_icon_colors: FileIconColors::Brand,
             folder_peeking: false,
             columns_show_sizes: true,
+            typing_mode: TypingMode::VimKeys,
             ..non_default_preferences()
         }
     );
@@ -681,6 +683,7 @@ fn every_saved_preference_loads_before_any_settings_page_exists() {
                 vec![".venv", "/fixture/custom_excluded"]
             );
             assert!(!manager.type_to_search());
+            assert_eq!(manager.typing_mode(), TypingMode::JumpToName);
             assert!(manager.arrow_navigation_scoped());
             assert!(manager.tenxer_mode());
             assert!(!manager.filter_include_subfolders());
@@ -1116,6 +1119,7 @@ fn all_preference_setters_publish_and_persist_without_duplicate_notifications() 
                 |m| m.set_search_open_files_directly(false),
                 |m| m.set_search_exclusions(vec!["changed_exclusion".to_owned()]),
                 |m| m.set_type_to_search(true),
+                |m| m.set_typing_mode(TypingMode::VimKeys),
                 |m| m.set_arrow_navigation_scoped(false),
                 |m| m.set_tenxer_mode(false),
                 |m| m.set_filter_include_subfolders(true),

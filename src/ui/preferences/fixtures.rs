@@ -20,6 +20,7 @@ pub(in crate::ui) fn non_default_preferences() -> Preferences {
         search_open_files_directly: true,
         search_exclusions: vec![".venv".into(), "/fixture/custom_excluded".into()],
         type_to_search: false,
+        typing_mode: TypingMode::JumpToName,
         arrow_navigation_scoped: true,
         tenxer_mode: true,
         filter_include_subfolders: false,
