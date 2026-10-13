@@ -82,15 +82,13 @@ pub(super) fn install_on(
     dispatcher.preview.enable_expansion();
     let dispatcher = Rc::new(dispatcher);
     let weak_dispatcher = Rc::downgrade(&dispatcher);
-    dispatcher
-        .preview
-        .set_expanded_key_handler(move |press| {
-            weak_dispatcher
-                .upgrade()
-                .map_or(Propagation::Proceed, |dispatcher| {
-                    dispatcher.expanded_window_key(press)
-                })
-        });
+    dispatcher.preview.set_expanded_key_handler(move |press| {
+        weak_dispatcher
+            .upgrade()
+            .map_or(Propagation::Proceed, |dispatcher| {
+                dispatcher.expanded_window_key(press)
+            })
+    });
     submit_prompt_on_activate(&dispatcher, weak_browser.clone());
     let key_root = root.as_ref().downgrade();
     let tab_scoped = !root.as_ref().is::<gtk::Window>();

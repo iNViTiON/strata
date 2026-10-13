@@ -1115,10 +1115,7 @@ fn tenxer_tools(mode: BrowserMode, chooser: bool) -> Vec<Shortcut> {
 
 const EXPANDED: &[Shortcut] = &[
     row(One(EXPAND_PREVIEW), "Expand or collapse the preview"),
-    row(
-        Any(&[LEFT, UP, DOWN, RIGHT]),
-        "Previous / next file",
-    ),
+    row(Any(&[LEFT, UP, DOWN, RIGHT]), "Previous / next file"),
     row(
         Any(&[EXTEND_LEFT, EXTEND_UP, EXTEND_DOWN, EXTEND_RIGHT]),
         "Seek, scroll, turn pages, or pan",

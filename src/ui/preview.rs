@@ -245,8 +245,8 @@ struct PreviewState {
     claim_on_resume: Cell<bool>,
 }
 
-use keyboard::MediaSeek;
 pub(in crate::ui) use expanded::{PreviewArrow, ZoomStep};
+use keyboard::MediaSeek;
 pub(in crate::ui) use keyboard::{
     ArchiveMove, DocumentScroll, MediaCommand, PreviewSurface, media_key_command,
 };
@@ -942,9 +942,8 @@ impl PreviewState {
         self.set_enabled(true);
         let reopening = self.closing.replace(false);
         let expanded = self.expanded.is_active();
-        let was_open = (self.revealer.reveals_child() && !reopening)
-            || self.sizing.is_suspended()
-            || expanded;
+        let was_open =
+            (self.revealer.reveals_child() && !reopening) || self.sizing.is_suspended() || expanded;
         let already_showing =
             self.current.borrow().as_ref() == Some(&entry) && self.current_request.get().is_some();
         let split = self.split.borrow().clone();

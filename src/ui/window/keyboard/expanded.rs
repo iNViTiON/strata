@@ -86,8 +86,7 @@ impl Dispatcher {
         if press.is(SPACE.ignoring(SHORTCUT_MODIFIERS)) {
             if press.is(EXPAND_PREVIEW) {
                 self.preview.collapse();
-            } else if press.is(SPACE) && !self.preview.expanded_media_key(MediaCommand::PlayPause)
-            {
+            } else if press.is(SPACE) && !self.preview.expanded_media_key(MediaCommand::PlayPause) {
                 self.preview.close_expanded();
             }
             return Some(Propagation::Stop);

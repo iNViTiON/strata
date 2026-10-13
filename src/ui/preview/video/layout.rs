@@ -132,11 +132,7 @@ mod imp {
             let (frame_width, frame_height) = self.frame_size(
                 content_width - 2 * margin,
                 free - 2 * margin,
-                if expanded {
-                    f64::INFINITY
-                } else {
-                    MAX_UPSCALE
-                },
+                if expanded { f64::INFINITY } else { MAX_UPSCALE },
             );
             let (outer_width, outer_height) = if frame_height >= FRAME_MIN {
                 (frame_width + 2 * margin, frame_height + 2 * margin)
