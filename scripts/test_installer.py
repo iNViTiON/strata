@@ -102,7 +102,7 @@ class InstallerTests(unittest.TestCase):
             recorded_calls,
             [
                 "auth status --hostname github.com",
-                "attestation verify /tmp/strata.tar.gz --repo lgse/strata",
+                "attestation verify /tmp/strata.tar.gz --repo iNViTiON/strata",
             ],
         )
 
