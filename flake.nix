@@ -51,10 +51,16 @@
             extensions = lib.unique ((rustPin.components or [ ]) ++ [ "rust-src" ]);
           };
 
-          # Prebuilt release binaries pinned (URL + checksum) by upstream's mise.lock.
+          # Prebuilt release binaries pinned (URL + checksum) by upstream's mise.lock,
+          # found by repository so upstream can switch mise backends (aqua:, github:).
           lockedTool =
-            name: binary:
+            repo: binary:
             let
+              name = builtins.head (
+                builtins.filter (key: builtins.match ".*:${repo}" key != null) (
+                  builtins.attrNames miseLock.tools
+                )
+              );
               entry = builtins.head miseLock.tools.${name};
               platform = entry."platforms.${misePlatform}";
             in
@@ -78,9 +84,9 @@
             };
 
           lockedTools = [
-            (lockedTool "aqua:EmbarkStudios/cargo-deny" "cargo-deny")
-            (lockedTool "aqua:crate-ci/typos" "typos")
-            (lockedTool "aqua:watchexec/cargo-watch" "cargo-watch")
+            (lockedTool "EmbarkStudios/cargo-deny" "cargo-deny")
+            (lockedTool "crate-ci/typos" "typos")
+            (lockedTool "watchexec/cargo-watch" "cargo-watch")
           ];
 
           # nixpkgs' mise lags behind mise.toml's min_version; the static release runs as-is.
