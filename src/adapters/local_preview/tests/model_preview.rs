@@ -63,6 +63,7 @@ fn model_requests_reuse_only_matching_size_palette_and_view_without_ui_state() {
                 render_document: false,
                 pdf_page: 0,
                 media_size: MediaPreviewSize::new(width, 200),
+                detail: Default::default(),
                 model_palette: palette,
                 model_view: view,
                 archive_password: None,
