@@ -295,7 +295,7 @@ impl Dispatcher {
 }
 
 /// Window-level commands that neither read nor change the listing.
-fn passes_through_preview(press: &KeyPress) -> bool {
+pub(super) fn passes_through_preview(press: &KeyPress) -> bool {
     press.is_any(&[
         REFERENCE,
         REFRESH,

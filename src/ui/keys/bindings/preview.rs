@@ -14,6 +14,12 @@ catalog! {
         MEDIA_MUTE: Binding = Binding::ctrl_alt(Key::m);
         MEDIA_PREVIOUS: Binding = Binding::ctrl_alt(Key::less);
         MEDIA_NEXT: Binding = Binding::ctrl_alt(Key::greater);
+
+        EXPAND_PREVIEW: Binding = Binding::shift(Key::space);
+        EXPANDED_ZOOM_IN: Binding = Binding::plain(Key::plus).ignoring(Modifiers::SHIFT_MASK);
+        EXPANDED_ZOOM_OUT: Binding = Binding::plain(Key::minus).ignoring(Modifiers::SHIFT_MASK);
+        // AZERTY types 0 with Shift.
+        EXPANDED_ZOOM_FIT: Binding = Binding::plain(Key::_0).ignoring(Modifiers::SHIFT_MASK);
     }
     tenxer_only {
         TENXER_MEDIA_MUTE: Binding = Binding::plain(Key::m);
@@ -32,6 +38,8 @@ catalog! {
     unlisted {
         PDF_ZOOM_RESET: Binding = Binding::ctrl(Key::_0);
         MEDIA_VOLUME_STEP_UP_EQUAL: Binding = Binding::plain(Key::equal);
+        EXPANDED_ZOOM_IN_EQUAL: Binding = Binding::plain(Key::equal).ignoring(Modifiers::SHIFT_MASK);
+        EXPANDED_MUTE: Binding = Binding::plain(Key::m);
         FIND_IN_PREVIEW: Binding = Binding::ctrl(Key::f);
         PREVIOUS_MATCH: Binding = Binding::shift(Key::Return);
 

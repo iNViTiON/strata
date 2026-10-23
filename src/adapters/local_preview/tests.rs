@@ -105,14 +105,22 @@ fn pdf_preview_emits_a_text_layer_matching_the_rendered_page() {
 
 #[test]
 fn pdf_rendering_fits_the_viewport_width_without_clipping_tall_pages() {
+    let standard = PreviewDetail::Standard;
     assert_eq!(
-        pdf_render_size(MediaPreviewSize::new(640, 480)),
+        pdf_render_size(MediaPreviewSize::new(640, 480), standard),
         PdfRenderSize::new(640, 1_800)
     );
     assert_eq!(
-        pdf_render_size(MediaPreviewSize::new(2_000, 480)),
+        pdf_render_size(MediaPreviewSize::new(2_000, 480), standard),
         PdfRenderSize::new(MediaPreviewSize::MAX_EDGE, 1_800)
     );
+    let viewport = MediaPreviewSize::new(640, 480);
+    let expanded = pdf_render_size(viewport, PreviewDetail::Expanded { width: 1_900 });
+    assert_eq!(expanded, PdfRenderSize::new_expanded(1_900, 3_200));
+    assert_ne!(expanded, PdfRenderSize::new(1_400, 1_800));
+    assert!(expanded.is_expanded());
+    let huge = pdf_render_size(viewport, PreviewDetail::Expanded { width: 9_000 });
+    assert_eq!(huge, PdfRenderSize::new_expanded(2_400, 3_200));
 }
 
 #[test]
