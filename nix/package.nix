@@ -127,8 +127,9 @@ craneLib.buildPackage {
       --replace-fail 'crate::trusted_command::resolve("bwrap")' '${bwrap}'
 
     # --replace-fail misses call sites added upstream later, and a hardcoded
-    # path bypasses the build-time variables.
-    if grep -rnE --include='*.rs' --exclude=tests.rs --exclude-dir=tests \
+    # path bypasses the build-time variables. runtime.rs holds the FHS defaults
+    # those variables override and the launch-time root allow-list.
+    if grep -rnE --include='*.rs' --exclude=tests.rs --exclude=runtime.rs --exclude-dir=tests \
       '\.arg\("/usr/bin/prlimit"\)|resolve\("bwrap"\)|"/usr/bin",|"/usr",' src/sandbox.rs src/sandbox; then
       echo "error: unpatched FHS sandbox paths remain; extend postPatch" >&2
       exit 1
