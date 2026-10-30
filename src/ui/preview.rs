@@ -52,6 +52,7 @@ mod pdf_ranges_tests;
 mod pdf_text;
 mod pdf_view;
 mod player_layout;
+mod preload;
 mod presentation;
 mod route;
 mod session;
@@ -258,6 +259,7 @@ struct PreviewState {
     claim_on_resume: Cell<bool>,
     released_from: Cell<Option<Option<usize>>>,
     operations: RefCell<Option<file_activity::Subscription>>,
+    preload: preload::NeighborPreload,
 }
 
 pub(in crate::ui) use expanded::{PreviewArrow, ZoomStep};
@@ -527,6 +529,14 @@ impl PreviewDrawer {
             claim_on_resume: Cell::new(false),
             released_from: Cell::new(None),
             operations: RefCell::new(None),
+            preload: preload::NeighborPreload::default(),
+        });
+        state.preload.attach(Rc::downgrade(&state));
+        let weak = Rc::downgrade(&state);
+        state.on_presentation_changed(move || {
+            if let Some(state) = weak.upgrade() {
+                state.preload.schedule();
+            }
         });
         let weak = Rc::downgrade(&state);
         state.enabled_action.connect_activate(move |_, _| {
@@ -584,6 +594,19 @@ impl PreviewDrawer {
             }
         });
         let preferences = super::preferences::PreferenceManager::shared();
+        let weak = Rc::downgrade(&state);
+        preferences.bind_preference(
+            &state.pane,
+            super::preferences::PreferenceManager::preload_neighbor_previews,
+            move |_, enabled| {
+                if let Some(state) = weak.upgrade() {
+                    state.preload.set_enabled(enabled);
+                    if enabled {
+                        state.preload.schedule();
+                    }
+                }
+            },
+        );
         let weak = Rc::downgrade(&state);
         preferences.bind_preference(
             &wrap,
@@ -969,9 +992,18 @@ impl PreviewState {
         if self.current.borrow().as_ref() == Some(&entry) && self.current_request.get().is_some() {
             return;
         }
+        let rapid = self.preload.note_focus_change();
         // A suspended l stays pending until this file changes or the drawer closes.
         self.claim_on_resume.set(false);
         if !self.revealer.reveals_child() {
+            self.show(entry, depth);
+            return;
+        }
+        if !rapid
+            && self
+                .preload
+                .is_ready(&entry, self.media_preview_size(), self.current_detail())
+        {
             self.show(entry, depth);
             return;
         }
@@ -1551,7 +1583,12 @@ impl PreviewState {
             }
             PreviewEvent::Ready(preview) if preview.request_id == expected => {
                 self.cancel_loading();
+                // Neighbors wait for a playing video's first frame instead.
+                let media = matches!(preview.content, PreviewContent::SandboxedMedia { .. });
                 self.render(preview);
+                if !media {
+                    self.preload.schedule();
+                }
             }
             PreviewEvent::Failed {
                 request_id,
@@ -1597,6 +1634,7 @@ impl PreviewState {
                     {
                         self.show_message(&title, &detail);
                     }
+                    self.preload.schedule();
                 }
             }
             PreviewEvent::NeedsPassword { request_id, entry } if request_id == expected => {
@@ -1817,8 +1855,11 @@ impl PreviewState {
                 let family = media_family(&preview.content_type);
                 let handed_off = self.handed_off.borrow().as_ref() == Some(&preview.entry.location);
                 source.audio_only = family == Some(MediaFamily::Audio);
-                let media =
-                    super::media::DecodedMedia::new(source.clone()).upcast::<gtk::MediaStream>();
+                let media = self
+                    .preload
+                    .take_media(&source, &preview.entry)
+                    .unwrap_or_else(|| super::media::DecodedMedia::new(source.clone()))
+                    .upcast::<gtk::MediaStream>();
                 self.media.replace(Some(media.clone()));
                 let weak = Rc::downgrade(self);
                 media.connect_playing_notify(move |media| {
@@ -1837,6 +1878,20 @@ impl PreviewState {
                         state.show_media_error(&error);
                     }
                 });
+                // The first frame marks the current player as settled; neighbors start then.
+                if media.is_prepared() {
+                    self.preload.schedule();
+                } else {
+                    let weak = Rc::downgrade(self);
+                    let handler = media.connect_prepared_notify(move |media| {
+                        if media.is_prepared()
+                            && let Some(state) = weak.upgrade()
+                        {
+                            state.preload.schedule();
+                        }
+                    });
+                    self.media_signals.borrow_mut().push(handler);
+                }
 
                 let preferences = super::preferences::PreferenceManager::shared();
                 if is_gif {

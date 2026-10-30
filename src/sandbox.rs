@@ -16,7 +16,7 @@ use std::{
 use rustix::process::{Pid, Signal, kill_process_group};
 
 use crate::services::{
-    ArchiveFormat, MediaPreviewSize, ModelFormat, ModelRender, SecretString,
+    ArchiveFormat, MediaPreviewSize, ModelFormat, ModelRender, PreviewPriority, SecretString,
     model_preview::MAX_MODEL_INPUT_BYTES,
 };
 
@@ -492,6 +492,7 @@ pub(crate) fn parse_with_progress(
         media_backend,
         cancellation,
         progress,
+        PreviewPriority::Current,
     );
     match result {
         Err(error)
@@ -501,6 +502,26 @@ pub(crate) fn parse_with_progress(
         }
         result => result,
     }
+}
+
+/// Renders for a neighboring entry: same sandbox, but every shared limit
+/// serves interactive requests first.
+pub(crate) fn parse_neighbor(
+    input: &Path,
+    operation: ParseOperation,
+    value: i32,
+    media_backend: MediaPreviewBackend,
+    cancellation: &Cancellation,
+) -> Result<ParseOutput, String> {
+    parse_sandboxed(
+        input,
+        operation,
+        value,
+        media_backend,
+        cancellation,
+        &|_| {},
+        PreviewPriority::Neighbor,
+    )
 }
 
 fn is_archive_contract_message(message: &str) -> bool {
@@ -517,6 +538,7 @@ fn parse_sandboxed(
     media_backend: MediaPreviewBackend,
     cancellation: &Cancellation,
     progress: &dyn Fn(crate::services::ModelPreviewStage),
+    priority: PreviewPriority,
 ) -> Result<ParseOutput, String> {
     if cancellation.is_cancelled() {
         return Err("Preview cancelled".to_owned());
@@ -540,9 +562,14 @@ fn parse_sandboxed(
         cancellation,
         progress,
         Arc::clone(&hold),
+        priority,
     ))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the canonical input, its file hold and the request priority travel with the parse request"
+)]
 fn parse_canonical(
     input: &Path,
     operation: ParseOperation,
@@ -551,6 +578,7 @@ fn parse_canonical(
     cancellation: &Cancellation,
     progress: &dyn Fn(crate::services::ModelPreviewStage),
     hold: Arc<crate::services::file_activity::Hold>,
+    priority: PreviewPriority,
 ) -> Result<ParseOutput, String> {
     let input_metadata =
         fs::metadata(input).map_err(|error| crate::services::io_error_message(&error))?;
@@ -580,7 +608,7 @@ fn parse_canonical(
             },
         );
     }
-    if let Some(result) = browser::preview(input, &operation, cancellation) {
+    if let Some(result) = browser::preview(input, &operation, cancellation, priority) {
         return result.map(|data| ParseOutput {
             data,
             page: 0,
@@ -588,6 +616,10 @@ fn parse_canonical(
             text_layer: None,
             model_mesh: None,
         });
+    }
+    // Without persistent workers there is no pool budget to keep neighbors within.
+    if priority == PreviewPriority::Neighbor && matches!(operation, ParseOperation::PreviewImage) {
+        return Err("Neighbor previews need persistent sandbox workers".to_owned());
     }
 
     let output = Arc::new(

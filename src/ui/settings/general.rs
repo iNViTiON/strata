@@ -75,6 +75,16 @@ pub(super) fn general_page(
         },
     );
     append_thumbnail_workers_option(&performance, &manager);
+    append_preference_switch(
+        &performance,
+        &manager,
+        PreferenceSwitch {
+            title: "Preload neighbor previews",
+            description: "Prepare the files above and below the selection in the background. Each neighboring video stays decoded and paused, using roughly 100–300 MiB (more for 4K). Uses extra CPU and battery.",
+            read: PreferenceManager::preload_neighbor_previews,
+            write: PreferenceManager::set_preload_neighbor_previews,
+        },
+    );
     append_video_preview_option(&performance, &manager);
 
     let window_buttons = super::settings_group(&preferences, "WINDOW BUTTONS");

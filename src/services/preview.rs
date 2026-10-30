@@ -292,8 +292,22 @@ impl ModelPreviewStage {
     }
 }
 
+/// Speculative loads yield to interactive ones at every shared limit.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PreviewPriority {
+    #[default]
+    Current,
+    Neighbor,
+}
+
 pub trait PreviewProvider {
     fn load(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle;
+
+    /// Starts work for an entry next to the selection. Dropping the handle
+    /// need not cancel work that has already begun.
+    fn preload(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle {
+        self.load(request, emit)
+    }
 }
 
 /// Leading bytes read to decide a local file's preview family.
@@ -442,6 +456,31 @@ pub(crate) fn model_format(entry: &FileEntry) -> Option<super::ModelFormat> {
 
 pub(crate) fn is_model(entry: &FileEntry) -> bool {
     model_format(entry).is_some()
+}
+
+/// Content worth rendering ahead of a selection. Text, documents and archives
+/// are cheap enough to load on demand; models, routes and covers hold the heavy permit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PreloadKind {
+    Image,
+    Pdf,
+    Media,
+}
+
+pub(crate) fn preload_kind(entry: &FileEntry) -> Option<PreloadKind> {
+    let name = &entry.native_name;
+    if is_model(entry)
+        || super::route_preview::RouteFormat::for_name(name).is_some()
+        || crate::sandbox::CoverFormat::for_name(name).is_some()
+    {
+        return None;
+    }
+    match content_family(&content_type_for_path(Path::new(name))) {
+        PreviewContent::Pdf { .. } => Some(PreloadKind::Pdf),
+        PreviewContent::Image => Some(PreloadKind::Image),
+        PreviewContent::Media => Some(PreloadKind::Media),
+        _ => None,
+    }
 }
 
 pub(crate) fn has_plain_text_extension(name: &OsStr) -> bool {
