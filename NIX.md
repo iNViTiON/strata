@@ -274,11 +274,13 @@ a successful "Sync upstream", every six hours, and on demand:
 2. In parallel, on that one commit: `checks` (upstream's pinned-container
    `scripts/quality.sh` plus `deny`, `typos` and the script tests), `nix` (the
    package for x86_64 and aarch64) and `binaries` (the archives for both).
-3. `publish`, only when all of them pass: uploads the packages to Cachix
+3. `sign`, after `binaries`: signs the update manifest that the in-app updater
+   and `install.sh` require (see [Signed releases](#signed-releases)).
+4. `publish`, only when all of them pass: uploads the packages to Cachix
    (`CACHIX_AUTH_TOKEN`, `CACHIX_SIGNING_KEY`), attests the archives, then
    moves `release` and pushes both tags with `SYNC_PAT` (`GITHUB_TOKEN` cannot
    push commits that touch workflows), deletes the candidate and publishes the
-   GitHub Release.
+   GitHub Release with the signed manifest beside the archives.
 
 Nothing reaches `release`, the tags, Cachix or the Releases page from a
 candidate that failed. The `nix` jobs therefore upload nothing themselves:
@@ -320,6 +322,24 @@ update channel, since the fork publishes nothing else. Users coming from an
 upstream install keep their saved channel and must choose Nightly once in
 Settings. The Nix package ignores all of this: its install-source marker
 disables the updater.
+
+### Signed releases
+
+The updater and `install.sh` refuse a release without a manifest signed by a
+key in their trust store, so `sign` runs in the `release-signing` environment
+(limit its deployment branches to `nix-dev`), which holds `UPDATE_SIGNING_KEY`
+and, during a rotation, `UPDATE_SIGNING_KEY_NEXT`. It checks out `nix-dev`, never
+the candidate, and signs the archives `binaries` built for
+`iNViTiON/strata`. Upstream's signer always names `lgse/strata`, so the job
+signs with a private copy whose repository is replaced (the replacement must
+match exactly once, so an upstream change to the script fails the job instead
+of signing the wrong identity).
+
+`.release/update-keys.json` is the signer's trust store. It must equal the
+candidate's `data/update-keys.json`, which `fork/distribution` sets together with
+`RELEASE_PUBLIC_KEYS` in `install.sh`; `sign` fails when they differ. To rotate a
+key, change all three on the same release (`fork/distribution` and this file),
+following `docs/signed-updates.md`.
 
 ### Rolling back
 
