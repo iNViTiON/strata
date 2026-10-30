@@ -297,6 +297,14 @@ jobs:
           CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
         run: cargo build --release --locked --target "$TARGET"
 
+      # Must stay a prefix of `USAGE` in src/qa.rs; scripts/test_qa_mutation.py checks it.
+      - name: Check the release binary has no QA mode
+        run: |
+          if strings "target/$TARGET/release/strata" | grep -F "usage: strata --qa"; then
+            echo "The release binary was built with the qa feature" >&2
+            exit 1
+          fi
+
       - name: Package binary
         run: |
           set -euo pipefail
@@ -316,7 +324,7 @@ jobs:
           install -m 644 data/io.github.lgse.Strata.desktop "dist/$package/"
           install -m 644 data/io.github.lgse.Strata.FileManager1.service "dist/$package/"
           install -m 644 data/icons/scalable/apps/io.github.lgse.Strata.svg "dist/$package/"
-          tar -C dist -czf "dist/$package.tar.gz" "$package"
+          tar --format=ustar -C dist -czf "dist/$package.tar.gz" "$package"
           (cd dist && sha256sum "$package.tar.gz" > "$package.tar.gz.sha256")
           (cd dist && sha256sum "$package.debug" > "$package.debug.sha256")
 
@@ -330,12 +338,110 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  # Signs the update manifest that the in-app updater and install.sh require.
+  # It runs the workflow's own tooling from nix-dev, never code from the
+  # candidate, and only reads the candidate's trust store as data. The
+  # `release-signing` environment holds UPDATE_SIGNING_KEY (and, during a
+  # rotation, UPDATE_SIGNING_KEY_NEXT) and must be limited to the nix-dev branch.
+  sign:
+    needs: [assemble, binaries]
+    if: needs.assemble.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release-signing
+    permissions:
+      contents: read
+    env:
+      REPOSITORY: ${{ github.repository }}
+      SOURCE_SHA: ${{ needs.assemble.outputs.sha }}
+      VERSION_TAG: ${{ needs.assemble.outputs.version_tag }}
+    steps:
+      - name: Check out the trusted signing tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Never the release candidate: it is the code being signed for.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      # The binaries trust the candidate's data/update-keys.json. Signing with a
+      # key it lacks would publish a release no installed client accepts.
+      - name: Require the candidate to trust the keys this workflow signs with
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H "Accept: application/vnd.github.raw+json" \
+            "repos/$REPOSITORY/contents/data/update-keys.json?ref=$SOURCE_SHA" \
+            > "$RUNNER_TEMP/candidate-update-keys.json"
+          if ! cmp .release/update-keys.json "$RUNNER_TEMP/candidate-update-keys.json"; then
+            echo "The candidate's data/update-keys.json differs from .release/update-keys.json." >&2
+            echo "Update both together (and install.sh's RELEASE_PUBLIC_KEYS on the candidate)." >&2
+            exit 1
+          fi
+
+      - name: Download the release archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: strata-*
+          path: dist
+          merge-multiple: true
+
+      # nix-dev carries upstream's signer, which always names lgse/strata; the
+      # fork's manifests must name the fork. Patching a private copy keeps the
+      # upstream file unedited (no conflict on every sync), and the substitution
+      # must match exactly once, so a changed upstream script fails loudly here.
+      - name: Prepare the signer for this repository
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/sign_update_manifest.py" <<'PY'
+          import sys
+          from pathlib import Path
+
+          source = Path("scripts/sign_update_manifest.py").read_text(encoding="utf-8")
+          upstream = '"repository": "lgse/strata"'
+          if source.count(upstream) != 1:
+              raise SystemExit("scripts/sign_update_manifest.py no longer names its repository exactly once; update this workflow.")
+          Path(sys.argv[1]).write_text(source.replace(upstream, '"repository": "iNViTiON/strata"'), encoding="utf-8")
+          PY
+
+      - name: Sign the release identity and archive digests
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          UPDATE_SIGNING_KEY_NEXT: ${{ secrets.UPDATE_SIGNING_KEY_NEXT }}
+        run: >-
+          python3 "$RUNNER_TEMP/sign_update_manifest.py"
+          --directory dist --version "${VERSION_TAG#v}" --source-commit "$SOURCE_SHA"
+          --trusted-keys .release/update-keys.json
+
+      - name: Check the manifest names this repository and release
+        run: |
+          set -euo pipefail
+          python3 - "$VERSION_TAG" "$SOURCE_SHA" <<'PY'
+          import json
+          import sys
+
+          manifest = json.load(open("dist/strata-update-manifest.json", encoding="utf-8"))
+          expected = {"repository": "iNViTiON/strata", "tag": sys.argv[1], "source_commit": sys.argv[2]}
+          for key, value in expected.items():
+              if manifest[key] != value:
+                  raise SystemExit(f"manifest {key} is {manifest[key]!r}, expected {value!r}")
+          PY
+
+      - name: Upload the signed manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-update-manifest
+          path: |
+            dist/strata-update-manifest.json
+            dist/strata-update-manifest.signatures.json
+          if-no-files-found: error
+
   # Everything passed: fill the cache, attest, then move `release` and tag it,
   # and publish the GitHub Release. The branch moves only after the uploads
   # worked, so a failure before that leaves `release` untouched and the next
   # run retries; every step skips what an earlier attempt already did.
   publish:
-    needs: [assemble, checks, nix, binaries]
+    needs: [assemble, checks, nix, binaries, sign]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -400,7 +506,13 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Attest the archives
+      - name: Download the signed update manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-update-manifest
+          path: dist
+
+      - name: Attest the archives and the manifest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
@@ -453,7 +565,7 @@ jobs:
           done
 
   report:
-    needs: [assemble, checks, nix, binaries, publish]
+    needs: [assemble, checks, nix, binaries, sign, publish]
     if: failure() && needs.assemble.result == 'success'
     runs-on: ubuntu-24.04
     steps:
@@ -462,7 +574,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.assemble.outputs.tag }}
-          RESULTS: checks ${{ needs.checks.result }}, nix ${{ needs.nix.result }}, binaries ${{ needs.binaries.result }}, publish ${{ needs.publish.result }}
+          RESULTS: checks ${{ needs.checks.result }}, nix ${{ needs.nix.result }}, binaries ${{ needs.binaries.result }}, sign ${{ needs.sign.result }}, publish ${{ needs.publish.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
