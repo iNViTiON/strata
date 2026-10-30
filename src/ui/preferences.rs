@@ -81,6 +81,15 @@ pub(crate) enum UnitSystem {
     Imperial,
 }
 
+/// What plain letters do in the file list while Type to search is off.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TypingMode {
+    #[default]
+    VimKeys,
+    JumpToName,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(in crate::ui) struct Preferences {
     mode: String,
@@ -114,6 +123,8 @@ pub(in crate::ui) struct Preferences {
     search_entry_limit: u32,
     #[serde(default = "default_enabled")]
     type_to_search: bool,
+    #[serde(default)]
+    typing_mode: TypingMode,
     #[serde(default)]
     arrow_navigation_scoped: bool,
     #[serde(default)]
@@ -389,6 +400,7 @@ impl Default for Preferences {
             search_time_limit: default_search_time_limit(),
             search_entry_limit: default_search_entry_limit(),
             type_to_search: true,
+            typing_mode: TypingMode::default(),
             arrow_navigation_scoped: false,
             tenxer_mode: false,
             filter_include_subfolders: true,
@@ -1053,6 +1065,15 @@ impl PreferenceManager {
 
     pub fn set_type_to_search(&self, enabled: bool) {
         self.preferences.borrow_mut().type_to_search = enabled;
+        self.save_preferences();
+    }
+
+    pub(crate) fn typing_mode(&self) -> TypingMode {
+        self.preferences.borrow().typing_mode
+    }
+
+    pub(crate) fn set_typing_mode(&self, mode: TypingMode) {
+        self.preferences.borrow_mut().typing_mode = mode;
         self.save_preferences();
     }
 
