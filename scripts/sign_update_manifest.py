@@ -18,10 +18,14 @@ TARGETS = ("aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu")
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 PUBLIC_KEY_PREFIX = bytes.fromhex("302a300506032b6570032100")
 NUMBER = r"(?:0|[1-9][0-9]*)"
+DEFAULT_REPOSITORY = "lgse/strata"
+REPOSITORY = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/(?![.]{1,2}$)[A-Za-z0-9._-]{1,100}")
 VERSION = re.compile(rf"{NUMBER}\.{NUMBER}\.{NUMBER}(?:-(?:(?:alpha|beta|rc)\.[1-9][0-9]*|nightly\.[0-9]{{8}}(?:\.[1-9][0-9]*)?))?")
 
 
-def manifest_bytes(directory, version, source_commit):
+def manifest_bytes(directory, version, source_commit, repository=DEFAULT_REPOSITORY):
+    if not REPOSITORY.fullmatch(repository):
+        raise ValueError("Invalid repository; expected owner/name")
     if not VERSION.fullmatch(version) or any(int(number) > 2**64 - 1 for number in re.findall(r"[0-9]+", version)):
         raise ValueError("Invalid release version")
     if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
@@ -39,7 +43,7 @@ def manifest_bytes(directory, version, source_commit):
         with path.open("rb") as archive:
             checksum = hashlib.file_digest(archive, "sha256").hexdigest()
         artifacts.append({"name": name, "target": target, "size": info.st_size, "sha256": checksum})
-    value = {"schema": 1, "repository": "lgse/strata", "tag": f"v{version}", "source_commit": source_commit, "artifacts": artifacts}
+    value = {"schema": 1, "repository": repository, "tag": f"v{version}", "source_commit": source_commit, "artifacts": artifacts}
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
 
@@ -87,6 +91,7 @@ def main():
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--repository", default=DEFAULT_REPOSITORY, help="owner/name the manifest identifies (default: %(default)s)")
     parser.add_argument("--trusted-keys", type=Path, default=Path(__file__).resolve().parent.parent / "data/update-keys.json")
     args = parser.parse_args()
     # Remove key material before spawning OpenSSL; only private temporary files carry it.
@@ -94,7 +99,7 @@ def main():
     if not private_pems[0]:
         parser.error("UPDATE_SIGNING_KEY is required; unsigned publication is not supported")
     try:
-        manifest = manifest_bytes(args.directory, args.version, args.source_commit)
+        manifest = manifest_bytes(args.directory, args.version, args.source_commit, args.repository)
         trusted_keys = json.loads(args.trusted_keys.read_text())
         with tempfile.TemporaryDirectory(prefix="strata-release-keys-") as staging:
             private_keys = []

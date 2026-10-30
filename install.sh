@@ -12,7 +12,7 @@ REQUIRED_PACKAGES=(
 RAW_PREVIEW_PACKAGES=(imagemagick libraw dcraw)
 # Raw Ed25519 public keys; keep in sync with data/update-keys.json, the updater's trust store.
 RELEASE_PUBLIC_KEYS=(
-  1589903225a2dd3c1bc87125884801552b07fd0a09855cfdbde3b84601cebf3c
+  fac0fca4a2eef90142abb293f2baddaee50cfe69d312e2e1a7df844e16bd8792
 )
 MANIFEST_NAME="strata-update-manifest.json"
 SIGNATURES_NAME="strata-update-manifest.signatures.json"

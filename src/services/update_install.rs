@@ -29,11 +29,11 @@ mod manifest;
 
 use download::{DownloadTimeouts, describe_download_error, describe_read_error, download_agent};
 
-const RELEASE_DOWNLOAD_ROOT: &str = "https://github.com/lgse/strata/releases/download";
+const RELEASE_DOWNLOAD_ROOT: &str = "https://github.com/iNViTiON/strata/releases/download";
 /// Releases published before signed update manifests cannot be verified, so cannot be installed.
 pub(super) const UPDATE_MANIFEST_ASSETS: [&str; 2] =
     [manifest::MANIFEST_NAME, manifest::SIGNATURES_NAME];
-const REPOSITORY: &str = "lgse/strata";
+const REPOSITORY: &str = "iNViTiON/strata";
 const MAX_UPDATE_ARCHIVE_BYTES: u64 = 128 * 1024 * 1024;
 const DESKTOP_ENTRY: &str = "io.github.lgse.Strata.desktop";
 const APPLICATION_ICON: &str = "io.github.lgse.Strata.svg";

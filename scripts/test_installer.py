@@ -29,6 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "install.sh"
 BASH = shutil.which("bash")
 SIGNED_FIXTURES = ROOT / "tests/fixtures/signed-update"
+FORK_REPOSITORY = "iNViTiON/strata"
 PRODUCTION_KEYS = json.loads((ROOT / "data/update-keys.json").read_text(encoding="utf-8"))
 
 
@@ -162,7 +163,7 @@ class InstallerFixture:
         target = subprocess.check_output(["uname", "-m"], text=True).strip()
         target = "aarch64" if target in ("aarch64", "arm64") else "x86_64"
         self.version = "1.0.0-nightly.20260101"
-        self.downloads = f"https://github.com/iNViTiON/strata/releases/download/v{self.version}"
+        self.downloads = f"https://github.com/{FORK_REPOSITORY}/releases/download/v{self.version}"
         self.archive_name = f"strata-{self.version}-{target}-unknown-linux-gnu.tar.gz"
         archive = self.release / self.archive_name
         with tarfile.open(archive, "w:gz") as bundle:
@@ -228,7 +229,7 @@ exec "$@"
         path.chmod(0o755)
 
     def sign_release(self) -> None:
-        manifest = signing.manifest_bytes(self.release, self.version, "b" * 40)
+        manifest = signing.manifest_bytes(self.release, self.version, "b" * 40, FORK_REPOSITORY)
         signatures = signing.sign_manifest(manifest, [self.signing_key], [self.signing_public_key])
         (self.release / signing.MANIFEST_NAME).write_bytes(manifest)
         (self.release / signing.SIGNATURES_NAME).write_bytes(signatures)
