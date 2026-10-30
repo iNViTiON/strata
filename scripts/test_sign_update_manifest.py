@@ -14,6 +14,7 @@ import sign_update_manifest as signing
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests/fixtures/signed-update"
+FIXTURE_REPOSITORY = "iNViTiON/strata"
 
 
 def test_key(directory, seed=7):
@@ -36,11 +37,11 @@ class SignedUpdateTests(unittest.TestCase):
             (self.dist / f"strata-0.12.0-{target}.tar.gz").write_bytes(b"strata update fixture\n")
         self.key, self.public = test_key(self.directory)
 
-    def manifest(self):
-        return signing.manifest_bytes(self.dist, "0.12.0", "a" * 40)
+    def manifest(self, repository=signing.DEFAULT_REPOSITORY):
+        return signing.manifest_bytes(self.dist, "0.12.0", "a" * 40, repository)
 
     def test_openssl_signature_matches_rust_interoperability_fixture(self):
-        manifest = self.manifest()
+        manifest = self.manifest(FIXTURE_REPOSITORY)
         signatures = signing.sign_manifest(manifest, [self.key], [self.public])
         self.assertEqual(manifest, (FIXTURES / signing.MANIFEST_NAME).read_bytes())
         self.assertEqual(signatures, (FIXTURES / signing.SIGNATURES_NAME).read_bytes())
@@ -87,6 +88,12 @@ class SignedUpdateTests(unittest.TestCase):
             with self.subTest(commit=commit), self.assertRaises(ValueError):
                 signing.manifest_bytes(self.dist, "0.12.0", commit)
 
+    def test_repository_is_bound_into_the_manifest_and_validated(self):
+        self.assertEqual(json.loads(self.manifest("example-org/strata.fork_1"))["repository"], "example-org/strata.fork_1")
+        for repository in ["", "strata", "a/b/c", "/strata", "owner/", "-owner/strata", "owner/..", "owner/.", "own er/strata", 'owner/"x', "owner/strata\n"]:
+            with self.subTest(repository=repository), self.assertRaises(ValueError):
+                self.manifest(repository)
+
     def test_dual_signing_requires_distinct_trusted_keys(self):
         other_key, other_public = test_key(self.directory, 8)
         signatures = json.loads(signing.sign_manifest(self.manifest(), [self.key, other_key], [self.public, other_public]))
@@ -113,6 +120,23 @@ class SignedUpdateTests(unittest.TestCase):
         self.assertTrue((self.dist / signing.SIGNATURES_NAME).exists())
         repeated = subprocess.run(command + ["--trusted-keys", str(trusted)], env=environment, capture_output=True)
         self.assertNotEqual(repeated.returncode, 0)
+
+    def test_cli_repository_option_defaults_to_upstream_and_rejects_malformed_values(self):
+        environment = {**os.environ, "UPDATE_SIGNING_KEY": self.key.read_text()}
+        trusted = self.directory / "keys.json"
+        trusted.write_text(json.dumps([self.public]))
+        command = ["python3", str(ROOT / "scripts/sign_update_manifest.py"), "--directory", str(self.dist), "--version", "0.12.0", "--source-commit", "a" * 40, "--trusted-keys", str(trusted)]
+        rejected = subprocess.run(command + ["--repository", "not-a-repository"], env=environment, capture_output=True)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertFalse((self.dist / signing.MANIFEST_NAME).exists())
+        for arguments, expected in (([], "lgse/strata"), (["--repository", "iNViTiON/strata"], "iNViTiON/strata")):
+            with self.subTest(arguments=arguments):
+                for name in (signing.MANIFEST_NAME, signing.SIGNATURES_NAME):
+                    (self.dist / name).unlink(missing_ok=True)
+                result = subprocess.run(command + arguments, env=environment, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                published = json.loads((self.dist / signing.MANIFEST_NAME).read_bytes())
+                self.assertEqual(published["repository"], expected)
 
     def test_signing_job_never_checks_out_the_selected_build_source(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
