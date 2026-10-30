@@ -79,17 +79,31 @@ pub(crate) const PDF_PASSWORD_PROTECTED: &str = "This PDF is password protected.
 pub(crate) struct PdfRenderSize {
     pub(crate) width: i32,
     pub(crate) height: i32,
+    expanded: bool,
 }
 
 impl PdfRenderSize {
     const MAX_WIDTH: i32 = 1_400;
     const MAX_HEIGHT: i32 = 1_800;
     const MAX_PIXELS: u64 = 2_500_000;
+    const EXPANDED_MAX_WIDTH: i32 = 2_400;
+    const EXPANDED_MAX_HEIGHT: i32 = 3_200;
+    const EXPANDED_MAX_PIXELS: u64 = 7_680_000;
 
     pub(crate) fn new(width: i32, height: i32) -> Self {
         Self {
             width: width.clamp(16, Self::MAX_WIDTH),
             height: height.clamp(16, Self::MAX_HEIGHT),
+            expanded: false,
+        }
+    }
+
+    /// The larger limits used by the expanded preview.
+    pub(crate) fn new_expanded(width: i32, height: i32) -> Self {
+        Self {
+            width: width.clamp(16, Self::EXPANDED_MAX_WIDTH),
+            height: height.clamp(16, Self::EXPANDED_MAX_HEIGHT),
+            expanded: true,
         }
     }
 
@@ -97,17 +111,42 @@ impl PdfRenderSize {
         Self::new(width, Self::MAX_HEIGHT)
     }
 
+    pub(crate) fn for_expanded_width(width: i32) -> Self {
+        Self::new_expanded(width, Self::EXPANDED_MAX_HEIGHT)
+    }
+
+    pub(crate) fn is_expanded(self) -> bool {
+        self.expanded
+    }
+
+    /// The same size clamped to the limits of its own kind.
+    pub(crate) fn normalized(self) -> Self {
+        if self.expanded {
+            Self::new_expanded(self.width, self.height)
+        } else {
+            Self::new(self.width, self.height)
+        }
+    }
+
     pub(crate) fn image_limits(self) -> (u32, u32, u64) {
-        let size = Self::new(self.width, self.height);
+        let size = self.normalized();
         let width = size.width as u32;
         let height = size.height as u32;
+        let maximum = if self.expanded {
+            Self::EXPANDED_MAX_PIXELS
+        } else {
+            Self::MAX_PIXELS
+        };
         (
             width,
             height,
-            (u64::from(width) * u64::from(height)).min(Self::MAX_PIXELS),
+            (u64::from(width) * u64::from(height)).min(maximum),
         )
     }
 }
+
+/// The longest edge of an image preview: 800 px normally, more when expanded.
+pub(crate) const EXPANDED_IMAGE_EDGE: u32 = 2_880;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CoverFormat {
@@ -187,6 +226,7 @@ pub(crate) enum ParseOperation {
     PreviewRaw,
     InspectImage,
     ConvertImage,
+    PreviewImageExpanded,
     DocumentImage,
     DocumentMermaid,
     DocumentMath {
@@ -228,6 +268,7 @@ impl ParseOperation {
             Self::PreviewRaw => "preview-raw",
             Self::InspectImage => "inspect-image",
             Self::ConvertImage => "convert-image",
+            Self::PreviewImageExpanded => "preview-image-expanded",
             Self::DocumentImage => "document-image",
             Self::DocumentMermaid => "document-mermaid",
             Self::DocumentMath { display: true } => "document-math",
@@ -314,6 +355,11 @@ impl ParseOperation {
             | Self::DocumentImage
             | Self::DocumentMermaid
             | Self::DocumentMath { .. } => Some((800, 800, 800 * 800)),
+            Self::PreviewImageExpanded => Some((
+                EXPANDED_IMAGE_EDGE,
+                EXPANDED_IMAGE_EDGE,
+                u64::from(EXPANDED_IMAGE_EDGE) * u64::from(EXPANDED_IMAGE_EDGE),
+            )),
             Self::PreviewPdf(size) => Some(size.image_limits()),
             Self::PreviewModel(render) => {
                 let size = MediaPreviewSize::new(render.size.width, render.size.height);
@@ -341,6 +387,7 @@ impl ParseOperation {
             | Self::ThumbnailPdf
             | Self::PreviewImage
             | Self::PreviewRaw
+            | Self::PreviewImageExpanded
             | Self::RawMetadata
             | Self::PreviewPdf(_) => Some(MAX_RASTER_INPUT_BYTES),
             Self::PreviewModel(render) if render.format != ModelFormat::Gcode => {
@@ -1087,9 +1134,13 @@ fn sandbox_command(
         &sandbox_input,
     ]);
     if let ParseOperation::PreviewMedia(size) | ParseOperation::PreviewAudio(size) = operation {
-        let size = MediaPreviewSize::new(size.width, size.height);
+        let size = size.normalized();
         command.arg("/dev/stdout");
-        command.arg(format!("{}x{}", size.width, size.height));
+        command.arg(if size.expanded {
+            format!("{}x{}:e@{}", size.width, size.height, size.max_fps)
+        } else {
+            format!("{}x{}", size.width, size.height)
+        });
     } else if let ParseOperation::AudioPeaks | ParseOperation::VideoStoryboard { .. } = operation {
         command.arg("/dev/stdout");
         command.arg(match operation {
@@ -1100,8 +1151,9 @@ fn sandbox_command(
         command.arg(format!("/output/{}", operation.output_name()));
         let value = match operation {
             ParseOperation::PreviewPdf(size) => {
-                let size = PdfRenderSize::new(size.width, size.height);
-                format!("{value}:{}x{}", size.width, size.height)
+                let size = size.normalized();
+                let suffix = if size.is_expanded() { ":e" } else { "" };
+                format!("{value}:{}x{}{suffix}", size.width, size.height)
             }
             ParseOperation::PreviewModel(render) => format!(
                 "{}:{}x{}:{:06x}:{}:{}",

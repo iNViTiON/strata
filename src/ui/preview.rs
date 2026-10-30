@@ -40,6 +40,7 @@ mod archive;
 pub(super) mod audio;
 mod components;
 mod ease_in;
+mod expanded;
 mod find;
 mod keyboard;
 mod layout;
@@ -49,12 +50,14 @@ mod model;
 #[cfg(test)]
 mod pdf_ranges_tests;
 mod pdf_text;
+mod pdf_view;
 mod player_layout;
 mod presentation;
 mod route;
 mod session;
 pub(super) mod video;
 mod waveform;
+mod zoom;
 
 pub(in crate::ui) const DEFAULT_WIDTH: i32 = 520;
 pub(in crate::ui) const MIN_WIDTH: i32 = 240;
@@ -206,6 +209,13 @@ struct PreviewState {
     allow_external_open: bool,
     print: gtk::Button,
     wrap: gtk::ToggleButton,
+    expand_button: gtk::Button,
+    expand_icon: gtk::Image,
+    expanded: expanded::ExpandedState,
+    zoom_view: RefCell<Option<zoom::ZoomPicture>>,
+    pdf_view: RefCell<Option<pdf_view::PdfView>>,
+    loaded_detail: Cell<PreviewDetail>,
+    refine_load: RefCell<Option<LoadHandle>>,
     text_view: RefCell<Option<sourceview5::View>>,
     text_scroll: RefCell<Option<gtk::ScrolledWindow>>,
     archive_browser: RefCell<Option<archive::ArchiveBrowser>>,
@@ -250,6 +260,7 @@ struct PreviewState {
     operations: RefCell<Option<file_activity::Subscription>>,
 }
 
+pub(in crate::ui) use expanded::{PreviewArrow, ZoomStep};
 use keyboard::MediaSeek;
 pub(in crate::ui) use keyboard::{
     ArchiveMove, DocumentScroll, MediaCommand, PreviewSurface, media_key_command,
@@ -327,6 +338,13 @@ impl PreviewDrawer {
         )));
         wrap.add_css_class("preview-header-action");
         wrap.set_visible(false);
+        let expand_icon = crate::assets::chrome_icon(crate::assets::icons::MAXIMIZE_2);
+        let expand_button = gtk::Button::builder()
+            .valign(gtk::Align::Center)
+            .visible(false)
+            .build();
+        expand_button.set_child(Some(&expand_icon));
+        expand_button.add_css_class("preview-header-action");
         let close = gtk::Button::builder().valign(gtk::Align::Center).build();
         super::preferences::PreferenceManager::shared().bind_preference(
             &close,
@@ -377,6 +395,7 @@ impl PreviewDrawer {
         header.append(&open);
         header.append(&print);
         header.append(&wrap);
+        header.append(&expand_button);
         header.append(&close);
         pane.append(&header);
         let find = find::PreviewFind::new();
@@ -457,6 +476,13 @@ impl PreviewDrawer {
             allow_external_open,
             print: print.clone(),
             wrap: wrap.clone(),
+            expand_button,
+            expand_icon,
+            expanded: expanded::ExpandedState::default(),
+            zoom_view: RefCell::new(None),
+            pdf_view: RefCell::new(None),
+            loaded_detail: Cell::new(PreviewDetail::Standard),
+            refine_load: RefCell::new(None),
             text_view: RefCell::new(None),
             text_scroll: RefCell::new(None),
             archive_browser: RefCell::new(None),
@@ -526,6 +552,9 @@ impl PreviewDrawer {
         install_preview_drag(&header_handle, &state);
         state.install_keyboard_ownership();
         state.install_find();
+        state.install_expand_button();
+        state.install_presentation_refinement();
+        state.sync_expand_button();
         let weak = Rc::downgrade(&state);
         document_view_button.connect_clicked(move |_| {
             let Some(state) = weak.upgrade() else {
@@ -539,7 +568,9 @@ impl PreviewDrawer {
         });
         let weak = Rc::downgrade(&state);
         state.pane.connect_unrealize(move |_| {
-            if let Some(state) = weak.upgrade() {
+            if let Some(state) = weak.upgrade()
+                && !state.expanded.is_relocating()
+            {
                 state.stop();
             }
         });
@@ -1003,11 +1034,14 @@ impl PreviewState {
         self.child_pane.set(false);
         self.set_enabled(true);
         let reopening = self.closing.replace(false);
-        let was_open = (self.revealer.reveals_child() && !reopening) || self.sizing.is_suspended();
+        let expanded = self.expanded.is_active();
+        let was_open =
+            (self.revealer.reveals_child() && !reopening) || self.sizing.is_suspended() || expanded;
         let already_showing =
             self.current.borrow().as_ref() == Some(&entry) && self.current_request.get().is_some();
         let split = self.split.borrow().clone();
         if let Some(split) = split.as_ref()
+            && !expanded
             && (!self.can_show_in(split) || self.sizing.is_suspended())
         {
             if !was_open || !already_showing {
@@ -1037,6 +1071,7 @@ impl PreviewState {
     }
 
     fn stop(&self) {
+        self.abandon_expansion();
         self.set_enabled(false);
         self.child_pane.set(false);
         self.clear_target();
@@ -1047,6 +1082,7 @@ impl PreviewState {
     }
 
     fn close(self: &Rc<Self>) {
+        self.collapse_now();
         let tree_focused = self
             .archive_browser
             .borrow()
@@ -1336,6 +1372,9 @@ impl PreviewState {
     }
 
     fn media_preview_size(&self) -> MediaPreviewSize {
+        if let Some(size) = self.expanded_media_size() {
+            return size;
+        }
         let split = self.split.borrow();
         let width = split
             .as_ref()
@@ -1452,8 +1491,10 @@ impl PreviewState {
             self.content_type.set_text(file_extension(&entry));
         }
         self.load.borrow_mut().take();
+        self.refine_load.borrow_mut().take();
         self.pdf_loads.borrow_mut().clear();
         let detail = self.current_detail();
+        self.loaded_detail.set(detail);
 
         let request_id = PreviewRequestId(self.next_request.get());
         self.next_request
@@ -1748,7 +1789,7 @@ impl PreviewState {
                 let bytes = glib::Bytes::from_owned(png);
                 match gtk::gdk::Texture::from_bytes(&bytes) {
                     Ok(texture) => {
-                        let picture = gtk::Picture::for_paintable(&texture);
+                        let picture = zoom::ZoomPicture::new(&texture);
                         if model {
                             super::accessibility::set_label(
                                 &picture,
@@ -1761,12 +1802,9 @@ impl PreviewState {
                             );
                         }
                         picture.add_css_class("preview-image");
-                        picture.set_can_shrink(true);
-                        picture.set_content_fit(gtk::ContentFit::Contain);
-                        picture.set_hexpand(true);
-                        picture.set_vexpand(true);
                         picture.set_cursor_from_name(Some("grab"));
                         install_preview_drag(&picture, self);
+                        self.zoom_view.replace(Some(picture.clone()));
                         self.content
                             .append(&media_layout::section(&picture, &texture));
                     }
@@ -2242,10 +2280,16 @@ impl PreviewState {
 
         let provider = self.provider.clone();
         let loads = self.pdf_loads.clone();
-        let render_size = self.media_preview_size();
+        let render = Rc::new(Cell::new(pdf_view::PdfRender {
+            size: self.media_preview_size(),
+            detail: self.current_detail(),
+        }));
         let initial_page = Rc::new(RefCell::new(Some((initial_page, initial_png))));
         let next_request = Rc::new(Cell::new(self.next_request.get().saturating_add(10_000)));
+        let next_request_for_refine = next_request.clone();
         let entry_for_bind = entry.clone();
+        let render_for_bind = render.clone();
+        let refine_loads = Rc::new(RefCell::new(HashMap::<i32, LoadHandle>::new()));
         let page_width_for_bind = page_width.clone();
         let visible_pages_for_bind = visible_pages.clone();
         let layers_for_bind = text_layers.clone();
@@ -2404,8 +2448,8 @@ impl PreviewState {
                     text_byte_limit: TEXT_BYTE_LIMIT,
                     render_document: false,
                     pdf_page: page_index,
-                    media_size: render_size,
-                    detail: Default::default(),
+                    media_size: render_for_bind.get().size,
+                    detail: render_for_bind.get().detail,
                     model_palette: super::theme::ThemeManager::shared().active_model_palette(),
                     model_view: Default::default(),
                     archive_password: None,
@@ -2416,6 +2460,7 @@ impl PreviewState {
         });
 
         let loads = self.pdf_loads.clone();
+        let refine_for_unbind = refine_loads.clone();
         let visible_pages_for_unbind = visible_pages.clone();
         let layers_for_unbind = text_layers.clone();
         let ranges_for_unbind = pdf_ranges.clone();
@@ -2423,6 +2468,7 @@ impl PreviewState {
             if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
                 let page = item.position() as i32;
                 loads.borrow_mut().remove(&page);
+                refine_for_unbind.borrow_mut().remove(&page);
                 visible_pages_for_unbind.borrow_mut().remove(&page);
                 pdf_drop_unselected_layer(&layers_for_unbind, &ranges_for_unbind, page);
             }
@@ -2442,13 +2488,30 @@ impl PreviewState {
 
         scroll.add_css_class("preview-pdf-scroll");
 
+        let refine = pdf_view::page_refiner(
+            self.provider.clone(),
+            entry.clone(),
+            pdf_view::PageRefinement {
+                render: render.clone(),
+                next_request: next_request_for_refine,
+                pages: visible_pages.clone(),
+                layers: text_layers.clone(),
+                page_width: page_width.clone(),
+                loads: refine_loads.clone(),
+            },
+        );
+        let pdf_view = pdf_view::PdfView::new(
+            &scroll,
+            zoom.clone(),
+            page_width.clone(),
+            visible_pages.clone(),
+            render.clone(),
+            refine,
+        );
         let zoom_scroll =
             gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         zoom_scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let weak_scroll = scroll.downgrade();
-        let zoom_for_scroll = zoom.clone();
-        let page_width_for_scroll = page_width.clone();
-        let visible_pages_for_scroll = visible_pages.clone();
+        let view_for_scroll = pdf_view.clone();
         zoom_scroll.connect_scroll(move |controller, _, dy| {
             if !controller
                 .current_event_state()
@@ -2456,41 +2519,14 @@ impl PreviewState {
             {
                 return glib::Propagation::Proceed;
             }
-            if let Some(scroll) = weak_scroll.upgrade() {
-                let next = pdf_zoom_after_scroll(zoom_for_scroll.get(), dy);
-                let previous = apply_pdf_zoom(
-                    &scroll,
-                    &zoom_for_scroll,
-                    &page_width_for_scroll,
-                    &visible_pages_for_scroll.borrow(),
-                    next,
-                );
-                if let Some(previous) = previous {
-                    preserve_pdf_view_center(&scroll, next / previous);
-                }
-            }
+            view_for_scroll.set_zoom(pdf_zoom_after_scroll(view_for_scroll.zoom(), dy));
             glib::Propagation::Stop
         });
         scroll.add_controller(zoom_scroll);
 
         let reset = gio::SimpleAction::new("reset-zoom", None);
-        let weak_scroll = scroll.downgrade();
-        let zoom_for_reset = zoom.clone();
-        let page_width_for_reset = page_width.clone();
-        let visible_pages_for_reset = visible_pages.clone();
-        reset.connect_activate(move |_, _| {
-            let Some(scroll) = weak_scroll.upgrade() else {
-                return;
-            };
-            // No view-center correction: the list view re-anchors the visible page itself.
-            apply_pdf_zoom(
-                &scroll,
-                &zoom_for_reset,
-                &page_width_for_reset,
-                &visible_pages_for_reset.borrow(),
-                PDF_MIN_ZOOM,
-            );
-        });
+        let view_for_reset = pdf_view.clone();
+        reset.connect_activate(move |_, _| view_for_reset.reset_zoom());
         let actions = gio::SimpleActionGroup::new();
         actions.add_action(&reset);
         scroll.insert_action_group("pdf", Some(&actions));
@@ -2710,6 +2746,7 @@ impl PreviewState {
             }
             glib::ControlFlow::Continue
         });
+        self.pdf_view.replace(Some(pdf_view));
         self.content.append(&scroll);
     }
 
@@ -3127,6 +3164,9 @@ impl PreviewState {
         self.wrap.set_visible(false);
         self.text_view.take();
         self.text_scroll.take();
+        self.zoom_view.take();
+        self.pdf_view.take();
+        self.refine_load.borrow_mut().take();
         self.archive_browser.take();
         self.clear_password_entry();
         match (keep, audio, video) {
@@ -3970,23 +4010,6 @@ fn pdf_page_width(scroll: &gtk::ScrolledWindow, zoom: f64) -> i32 {
         .saturating_sub(PDF_PAGE_GAP * 2)
         .max(1);
     (f64::from(fit_width) * zoom).round() as i32
-}
-
-fn apply_pdf_zoom(
-    scroll: &gtk::ScrolledWindow,
-    zoom: &Cell<f64>,
-    page_width: &Cell<i32>,
-    pages: &HashMap<i32, (gtk::Overlay, gtk::Picture, gtk::DrawingArea)>,
-    next: f64,
-) -> Option<f64> {
-    let previous = zoom.replace(next);
-    if (next - previous).abs() < f64::EPSILON {
-        return None;
-    }
-    let width = pdf_page_width(scroll, next);
-    page_width.set(width);
-    resize_pdf_pages(pages, width);
-    Some(previous)
 }
 
 fn resize_pdf_pages(

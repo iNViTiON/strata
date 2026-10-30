@@ -48,6 +48,8 @@
     "cross_volume_drop_strategy": "always-ask",
     "release_channel": "stable",
     "video_preview_backend": "automatic",
+    "expanded_preview_style": "overlay",
+    "expanded_preview_shift_controls": true,
     "preview_muted": true,
     "preview_volume": 1.0,
     "sidebar_order": [
