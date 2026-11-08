@@ -120,10 +120,9 @@ craneLib.buildPackage {
   # where libva loads its VA-API driver from and the sandbox does not otherwise
   # look.
   postPatch = ''
-    substituteInPlace src/sandbox.rs \
-      --replace-fail '"/app",' '"/app", "--ro-bind-try", "/run/opengl-driver", "/run/opengl-driver",' \
-      --replace-fail 'crate::trusted_command::resolve("bwrap")' '${bwrap}'
-    substituteInPlace src/sandbox/archive.rs src/sandbox/media.rs src/sandbox/browser.rs \
+    substituteInPlace src/sandbox/command.rs \
+      --replace-fail '"/app",' '"/app", "--ro-bind-try", "/run/opengl-driver", "/run/opengl-driver",'
+    substituteInPlace src/sandbox.rs src/sandbox/archive.rs src/sandbox/media.rs src/sandbox/browser.rs \
       --replace-fail 'crate::trusted_command::resolve("bwrap")' '${bwrap}'
 
     # --replace-fail misses call sites added upstream later, and a hardcoded

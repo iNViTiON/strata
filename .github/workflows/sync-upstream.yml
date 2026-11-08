@@ -116,6 +116,7 @@ jobs:
         if: failure() && steps.rebase.outputs.reason != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           REASON: ${{ steps.rebase.outputs.reason }}
           FILES: ${{ steps.rebase.outputs.files }}
           COMMIT: ${{ steps.rebase.outputs.commit }}
@@ -167,6 +168,7 @@ jobs:
         if: success() && steps.rebase.conclusion == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           for number in $(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[].number'); do
