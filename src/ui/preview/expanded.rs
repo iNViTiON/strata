@@ -52,6 +52,7 @@ impl Anchor {
             && !mark.is_deleted()
         {
             view.scroll_to_mark(mark, 0.0, true, 0.0, 0.5);
+            set_to_fraction(&scroll.hadjustment(), self.horizontal);
             return;
         }
         set_to_fraction(&scroll.hadjustment(), self.horizontal);
@@ -520,8 +521,12 @@ impl PreviewState {
             .and_downcast::<gtk::TextView>()
             .and_then(|view| {
                 let visible = view.visible_rect();
-                let iter =
-                    view.iter_at_location(visible.x(), visible.y() + visible.height() / 2)?;
+                // The left edge is margin and gutter, which hold no text.
+                let mut iter = view.iter_at_location(
+                    visible.x() + visible.width() / 2,
+                    visible.y() + visible.height() / 2,
+                )?;
+                view.backward_display_line_start(&mut iter);
                 let mark = view.buffer().create_mark(None, &iter, true);
                 Some((view, mark))
             });
