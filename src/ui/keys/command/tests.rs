@@ -20,6 +20,8 @@ const MANY_ROLES: &str =
 const GENERIC: &str = "a key many surfaces read for their own job, kept as a fixed binding";
 const GTK_OWNED: &str = "GTK acts on it once the dispatcher yields";
 const EXTENDS_SELECTION: &str = "Shift with a motion key extends the selection and stays fixed";
+const EXPANDED_PREVIEW: &str = "read only while the expanded preview has focus, where it drives \
+     the expanded view; kept as a fixed binding";
 const PATH_SEPARATOR: &str = "the filter's path separator, read from the text an input method \
      commits rather than from the key; not a rebindable action";
 
@@ -44,6 +46,12 @@ const NOT_COMMANDS: &[(&str, &str)] = &[
     ("DOCUMENT_START", GTK_OWNED),
     ("DOCUMENT_END", GTK_OWNED),
     ("FILTER_DESCEND", PATH_SEPARATOR),
+    ("EXPAND_PREVIEW", EXPANDED_PREVIEW),
+    ("EXPANDED_ZOOM_IN", EXPANDED_PREVIEW),
+    ("EXPANDED_ZOOM_OUT", EXPANDED_PREVIEW),
+    ("EXPANDED_ZOOM_FIT", EXPANDED_PREVIEW),
+    ("EXPANDED_ZOOM_IN_EQUAL", EXPANDED_PREVIEW),
+    ("EXPANDED_MUTE", EXPANDED_PREVIEW),
 ];
 
 const TIMELINE: &str = "the media timeline reads it in either map";

@@ -1491,12 +1491,18 @@ const EXPANDED: &[Shortcut] = &[
         One(EXPAND_PREVIEW.shown()),
         "Expand or collapse the preview",
     ),
-    row(Any(shown![LEFT, UP, DOWN, RIGHT]), "Previous / next file"),
-    row(
+    within(
+        "%{keys} in the expanded preview",
+        Any(shown![LEFT, UP, DOWN, RIGHT]),
+        "Previous / next file",
+    ),
+    within(
+        "%{keys} in the expanded preview",
         Any(shown![EXTEND_LEFT, EXTEND_UP, EXTEND_DOWN, EXTEND_RIGHT]),
         "Seek, scroll, turn pages, or pan",
     ),
-    row(
+    within(
+        "%{keys} in the expanded preview",
         Any(shown![
             EXPANDED_ZOOM_IN,
             EXPANDED_ZOOM_OUT,
@@ -1504,8 +1510,16 @@ const EXPANDED: &[Shortcut] = &[
         ]),
         "Zoom an image or PDF; fit to the view",
     ),
-    row(One(SPACE.shown()), "Play / pause, or close the preview"),
-    row(One(ESCAPE.shown()), "Back to the small preview"),
+    within(
+        "%{keys} in the expanded preview",
+        One(SPACE.shown()),
+        "Play / pause, or close the preview",
+    ),
+    within(
+        "%{keys} in the expanded preview",
+        One(ESCAPE.shown()),
+        "Back to the small preview",
+    ),
 ];
 
 const MEDIA: &[Shortcut] = &[

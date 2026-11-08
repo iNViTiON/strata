@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "在侧边栏中按 %{keys}",
   "%{keys} in the header": "在顶栏中按 %{keys}",
   "%{keys} in the preview": "在预览中按 %{keys}",
+  "%{keys} in the expanded preview": "在展开预览中按 %{keys}",
   "%{keys} in the sidebar": "在侧边栏中按 %{keys}",
   "%{keys} on the Back button": "在“后退”按钮上按 %{keys}",
   "%{keys} in top bar": "在顶栏中按 %{keys}",

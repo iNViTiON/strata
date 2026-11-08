@@ -885,6 +885,7 @@ fn expanding_an_image_swaps_in_a_larger_raster_and_keeps_zoom_and_place() {
             wait_view(&expanded, |preview| {
                 preview.image_texture_size() == Some((800, 600))
             });
+            let standard_renders = expanded.provider.asked_for("image.png", false);
             assert_eq!(expanded.provider.asked_for("image.png", true), 1);
             assert!(
                 preview.image_zoom().is_some_and(|zoom| zoom > 1.9),
@@ -903,7 +904,11 @@ fn expanding_an_image_swaps_in_a_larger_raster_and_keeps_zoom_and_place() {
                 Some((800, 600)),
                 "collapsing keeps the sharper raster"
             );
-            assert_eq!(expanded.provider.asked_for("image.png", false), 1);
+            assert_eq!(
+                expanded.provider.asked_for("image.png", false),
+                standard_renders,
+                "collapsing renders nothing new"
+            );
             assert_eq!(expanded.provider.asked_for("image.png", true), 1);
         },
     );
