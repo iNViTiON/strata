@@ -20,6 +20,8 @@ const MANY_ROLES: &str =
 const GENERIC: &str = "a key many surfaces read for their own job, kept as a fixed binding";
 const GTK_OWNED: &str = "GTK acts on it once the dispatcher yields";
 const EXTENDS_SELECTION: &str = "Shift with a motion key extends the selection and stays fixed";
+const JUMP_TO_NAME: &str = "steps through the names a typed prefix matches; read only while \
+     jumping by name and kept fixed beside the typed prefix";
 const PATH_SEPARATOR: &str = "the filter's path separator, read from the text an input method \
      commits rather than from the key; not a rebindable action";
 
@@ -44,6 +46,8 @@ const NOT_COMMANDS: &[(&str, &str)] = &[
     ("DOCUMENT_START", GTK_OWNED),
     ("DOCUMENT_END", GTK_OWNED),
     ("FILTER_DESCEND", PATH_SEPARATOR),
+    ("NEXT_NAME", JUMP_TO_NAME),
+    ("PREVIOUS_NAME", JUMP_TO_NAME),
 ];
 
 const TIMELINE: &str = "the media timeline reads it in either map";
