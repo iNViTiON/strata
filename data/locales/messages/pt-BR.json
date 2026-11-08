@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "%{keys} na barra lateral",
   "%{keys} in the header": "%{keys} no cabeçalho",
   "%{keys} in the preview": "%{keys} na prévia",
+  "%{keys} in the expanded preview": "%{keys} na prévia ampliada",
   "%{keys} in the sidebar": "%{keys} na barra lateral",
   "%{keys} on the Back button": "%{keys} no botão Voltar",
   "%{keys} in top bar": "%{keys} na barra superior",

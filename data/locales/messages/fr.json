@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "%{keys} dans la barre latérale",
   "%{keys} in the header": "%{keys} dans l’en-tête",
   "%{keys} in the preview": "%{keys} dans l’aperçu",
+  "%{keys} in the expanded preview": "%{keys} dans l’aperçu agrandi",
   "%{keys} in the sidebar": "%{keys} dans la barre latérale",
   "%{keys} on the Back button": "%{keys} sur le bouton Précédent",
   "%{keys} in top bar": "%{keys} dans la barre supérieure",

@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "サイドバーで %{keys}",
   "%{keys} in the header": "ヘッダーで %{keys}",
   "%{keys} in the preview": "プレビューで %{keys}",
+  "%{keys} in the expanded preview": "拡大プレビューで %{keys}",
   "%{keys} in the sidebar": "サイドバーで %{keys}",
   "%{keys} on the Back button": "「戻る」ボタンで %{keys}",
   "%{keys} in top bar": "トップバーで %{keys}",

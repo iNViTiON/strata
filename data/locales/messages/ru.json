@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "%{keys} в боковой панели",
   "%{keys} in the header": "%{keys} в заголовке",
   "%{keys} in the preview": "%{keys} в предпросмотре",
+  "%{keys} in the expanded preview": "%{keys} в развёрнутом предпросмотре",
   "%{keys} in the sidebar": "%{keys} в боковой панели",
   "%{keys} on the Back button": "%{keys} на кнопке «Назад»",
   "%{keys} in top bar": "%{keys} в верхней панели",

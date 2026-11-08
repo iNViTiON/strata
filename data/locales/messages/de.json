@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "%{keys} in der Seitenleiste",
   "%{keys} in the header": "%{keys} im Fensterkopf",
   "%{keys} in the preview": "%{keys} in der Vorschau",
+  "%{keys} in the expanded preview": "%{keys} in der erweiterten Vorschau",
   "%{keys} in the sidebar": "%{keys} in der Seitenleiste",
   "%{keys} on the Back button": "%{keys} auf der Zurück-Schaltfläche",
   "%{keys} in top bar": "%{keys} in der oberen Leiste",
