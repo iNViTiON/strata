@@ -27,7 +27,7 @@ impl PreviewState {
         } else {
             preferences.preview_video_start()
         };
-        let media = self.open_media_stream(source.clone(), start_percent);
+        let media = self.open_media_stream(source.clone(), &preview.entry, start_percent);
         if is_gif {
             media.set_loop(true);
         } else {
@@ -77,10 +77,17 @@ impl PreviewState {
     fn open_media_stream(
         self: &Rc<Self>,
         source: crate::services::SandboxedMedia,
+        entry: &FileEntry,
         start_percent: u32,
     ) -> gtk::MediaStream {
-        let decoded = super::super::media::DecodedMedia::new(source);
-        decoded.set_start_percent(start_percent);
+        let decoded = match self.preload.take_media(&source, entry) {
+            Some(parked) => parked,
+            None => {
+                let decoded = super::super::media::DecodedMedia::new(source);
+                decoded.set_start_percent(start_percent);
+                decoded
+            }
+        };
         let media = decoded.upcast::<gtk::MediaStream>();
         self.media.replace(Some(media.clone()));
         let weak = Rc::downgrade(self);
@@ -100,6 +107,20 @@ impl PreviewState {
                 state.show_media_error(&error);
             }
         });
+        // The first frame marks the current player as settled; neighbors start then.
+        if media.is_prepared() {
+            self.preload.schedule();
+        } else {
+            let weak = Rc::downgrade(self);
+            let handler = media.connect_prepared_notify(move |media| {
+                if media.is_prepared()
+                    && let Some(state) = weak.upgrade()
+                {
+                    state.preload.schedule();
+                }
+            });
+            self.media_signals.borrow_mut().push(handler);
+        }
         media
     }
 

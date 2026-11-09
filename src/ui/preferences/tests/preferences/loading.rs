@@ -79,6 +79,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
     saved.remove("columns_show_sizes");
     saved.remove("language");
     saved.remove("typing_mode");
+    saved.remove("preload_neighbor_previews");
     saved.remove("preview_video_start");
     saved.remove("preview_text_wrap");
     let restored: Preferences = saved.try_into().expect("backward-compatible preferences");
@@ -98,6 +99,7 @@ fn older_preferences_keep_backward_compatible_behavior_defaults() {
             folder_peeking: false,
             columns_show_sizes: true,
             typing_mode: TypingMode::VimKeys,
+            preload_neighbor_previews: false,
             preview_video_start: 0,
             preview_text_wrap: true,
             ..non_default_preferences()

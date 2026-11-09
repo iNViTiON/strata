@@ -19,7 +19,8 @@ use crate::{
     sandbox::{Cancellation, MediaPreviewBackend, PdfRenderSize},
     services::{
         LoadHandle, MediaPreviewSize, ModelRender, PreviewContent, PreviewDetail, PreviewEvent,
-        PreviewProvider, PreviewRequest, normalize_preview_text, route_preview::RouteRender,
+        PreviewPriority, PreviewProvider, PreviewRequest, normalize_preview_text,
+        route_preview::RouteRender,
     },
 };
 // The test modules reach these through `super::*`.
@@ -36,11 +37,22 @@ const MAX_PREVIEW_CACHE_ENTRIES: usize = 64;
 const MAX_PREVIEW_CACHE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_CONCURRENT_HEAVY_PREVIEWS: usize = 1;
 
+/// Lower ranks are served first. A neighbor never overtakes interactive work
+/// but does run before the queued later pages of the document being read.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum HeavyRank {
+    Interactive,
+    Neighbor,
+    LaterPage,
+}
+
 #[derive(Default)]
 struct HeavyPreviewQueue {
     running: usize,
     next_id: u64,
-    queued: VecDeque<(u64, oneshot::Sender<HeavyPreviewPermit>)>,
+    queued: VecDeque<(u64, HeavyRank, oneshot::Sender<HeavyPreviewPermit>)>,
+    // Cancels the neighbor render holding the permit, so interactive work never waits for it.
+    neighbor_running: Option<Cancellation>,
 }
 
 struct HeavyPreviewWaiter {
@@ -57,7 +69,7 @@ impl HeavyPreviewWaiter {
 impl Drop for HeavyPreviewWaiter {
     fn drop(&mut self) {
         HEAVY_PREVIEW_QUEUE.with(|queue| {
-            queue.borrow_mut().queued.retain(|(id, _)| *id != self.id);
+            queue.borrow_mut().queued.retain(|(id, ..)| *id != self.id);
         });
     }
 }
@@ -71,6 +83,10 @@ impl Drop for HeavyPreviewPermit {
 }
 
 fn request_heavy_preview_permit() -> HeavyPreviewWaiter {
+    request_ranked_heavy_permit(HeavyRank::Interactive)
+}
+
+fn request_ranked_heavy_permit(rank: HeavyRank) -> HeavyPreviewWaiter {
     let (send, receive) = oneshot::channel();
     let (id, start) = HEAVY_PREVIEW_QUEUE.with(|queue| {
         let mut queue = queue.borrow_mut();
@@ -80,7 +96,12 @@ fn request_heavy_preview_permit() -> HeavyPreviewWaiter {
             queue.running += 1;
             (id, Some(send))
         } else {
-            queue.queued.push_back((id, send));
+            if rank == HeavyRank::Interactive
+                && let Some(neighbor) = &queue.neighbor_running
+            {
+                neighbor.cancel();
+            }
+            queue.queued.push_back((id, rank, send));
             (id, None)
         }
     });
@@ -99,7 +120,15 @@ fn release_heavy_preview_permit() {
     let next = HEAVY_PREVIEW_QUEUE.with(|queue| {
         let mut queue = queue.borrow_mut();
         queue.running = queue.running.saturating_sub(1);
-        let next = queue.queued.pop_front().map(|(_, send)| send);
+        queue.neighbor_running = None;
+        let next = queue
+            .queued
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (id, rank, _))| (*rank, *id))
+            .map(|(index, _)| index)
+            .and_then(|index| queue.queued.remove(index))
+            .map(|(_, _, send)| send);
         if next.is_some() {
             queue.running += 1;
         }
@@ -110,6 +139,87 @@ fn release_heavy_preview_permit() {
     {
         drop(permit);
     }
+}
+
+/// A neighbor's heavy render, which the interactive request for the same
+/// page joins rather than repeating.
+struct NeighborRender {
+    token: u64,
+    running: bool,
+    cancel: Cancellation,
+    waiters: Vec<oneshot::Sender<()>>,
+}
+
+struct NeighborRenderGuard {
+    key: PreviewCacheKey,
+    token: u64,
+}
+
+impl Drop for NeighborRenderGuard {
+    fn drop(&mut self) {
+        let finished = NEIGHBOR_RENDERS.with(|renders| {
+            let mut renders = renders.borrow_mut();
+            renders
+                .get(&self.key)
+                .is_some_and(|render| render.token == self.token)
+                .then(|| renders.remove(&self.key))
+                .flatten()
+        });
+        for waiter in finished.into_iter().flat_map(|render| render.waiters) {
+            let _ = waiter.send(());
+        }
+    }
+}
+
+fn begin_neighbor_render(
+    key: &PreviewCacheKey,
+    cancel: &Cancellation,
+) -> Option<NeighborRenderGuard> {
+    NEIGHBOR_RENDERS.with(|renders| {
+        let mut renders = renders.borrow_mut();
+        if renders.contains_key(key) {
+            return None;
+        }
+        let token = NEXT_NEIGHBOR_TOKEN.with(|next| next.replace(next.get().wrapping_add(1)));
+        renders.insert(
+            key.clone(),
+            NeighborRender {
+                token,
+                running: false,
+                cancel: cancel.clone(),
+                waiters: Vec::new(),
+            },
+        );
+        Some(NeighborRenderGuard {
+            key: key.clone(),
+            token,
+        })
+    })
+}
+
+fn mark_neighbor_running(key: &PreviewCacheKey, cancel: &Cancellation) {
+    NEIGHBOR_RENDERS.with(|renders| {
+        if let Some(render) = renders.borrow_mut().get_mut(key) {
+            render.running = true;
+        }
+    });
+    HEAVY_PREVIEW_QUEUE.with(|queue| queue.borrow_mut().neighbor_running = Some(cancel.clone()));
+}
+
+/// An interactive request for a page a neighbor is rendering waits for it; if
+/// the neighbor has not started, it is dropped and the request renders itself.
+fn join_neighbor_render(key: &PreviewCacheKey) -> Option<oneshot::Receiver<()>> {
+    NEIGHBOR_RENDERS.with(|renders| {
+        let mut renders = renders.borrow_mut();
+        let render = renders.get_mut(key)?;
+        if !render.running {
+            render.cancel.cancel();
+            return None;
+        }
+        let (send, receive) = oneshot::channel();
+        render.waiters.push(send);
+        Some(receive)
+    })
 }
 
 struct PreviewCache {
@@ -188,6 +298,8 @@ fn preview_content_size(content: &PreviewContent) -> usize {
 
 thread_local! {
     static HEAVY_PREVIEW_QUEUE: RefCell<HeavyPreviewQueue> = RefCell::new(HeavyPreviewQueue::default());
+    static NEIGHBOR_RENDERS: RefCell<HashMap<PreviewCacheKey, NeighborRender>> = RefCell::new(HashMap::new());
+    static NEXT_NEIGHBOR_TOKEN: Cell<u64> = const { Cell::new(0) };
     static PREVIEW_CACHE: RefCell<PreviewCache> = RefCell::new(PreviewCache {
         entries: HashMap::new(),
         recent: VecDeque::new(),
@@ -208,6 +320,15 @@ impl LocalPreviewProvider {
 }
 
 impl PreviewProvider for LocalPreviewProvider {
+    fn preload(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle {
+        self.load_prioritized(
+            request,
+            emit,
+            crate::sandbox::parse_neighbor,
+            PreviewPriority::Neighbor,
+        )
+    }
+
     fn load(&self, request: PreviewRequest, emit: Rc<dyn Fn(PreviewEvent)>) -> LoadHandle {
         use futures_lite::StreamExt;
         if !crate::services::is_model(&request.entry) {
@@ -232,6 +353,7 @@ impl PreviewProvider for LocalPreviewProvider {
                     value,
                     media_backend: backend,
                     cancellation,
+                    priority: PreviewPriority::Current,
                 };
                 crate::sandbox::parse_with_progress(request, &|stage| {
                     let _ = send.borrow_mut().try_send(stage);
@@ -252,6 +374,16 @@ impl LocalPreviewProvider {
         emit: Rc<dyn Fn(PreviewEvent)>,
         render: impl RenderFn,
     ) -> LoadHandle {
+        self.load_prioritized(request, emit, render, PreviewPriority::Current)
+    }
+
+    fn load_prioritized(
+        &self,
+        request: PreviewRequest,
+        emit: Rc<dyn Fn(PreviewEvent)>,
+        render: impl RenderFn,
+        priority: PreviewPriority,
+    ) -> LoadHandle {
         let media_preview_backend = (self.media_preview_backend)();
         let cancellation = Cancellation::default();
         let abort_safe = Rc::new(Cell::new(true));
@@ -261,6 +393,7 @@ impl LocalPreviewProvider {
             media_preview_backend,
             cancellation.clone(),
             abort_safe.clone(),
+            priority == PreviewPriority::Neighbor,
         );
         let task = glib::MainContext::default().spawn_local(load.run(render));
         LoadHandle::new(move || {

@@ -62,7 +62,7 @@ use media_render::SandboxedPreview;
 pub(super) use media_session::ListingPosition;
 use media_session::{
     AudioPreview, MediaFamily, MediaTrack, PlaybackContinuation, VideoPreview, entry_family,
-    media_family,
+    is_audio_type, media_family,
 };
 #[cfg(test)]
 use pdf::{pdf_apply_ranges, pdf_desired_ranges, pdf_drop_unselected_layer, pdf_selected_text};
@@ -74,6 +74,7 @@ mod model;
 mod pdf_ranges_tests;
 mod pdf_text;
 mod player_layout;
+mod preload;
 mod presentation;
 mod route;
 mod session;
@@ -227,6 +228,7 @@ struct PreviewState {
     claim_on_resume: Cell<bool>,
     released_from: Cell<Option<Option<usize>>>,
     operations: RefCell<Option<file_activity::Subscription>>,
+    preload: preload::NeighborPreload,
 }
 
 pub(in crate::ui) use expanded::{PreviewArrow, ZoomStep};
