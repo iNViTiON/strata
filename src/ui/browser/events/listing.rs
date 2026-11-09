@@ -109,6 +109,7 @@ impl ViewState {
     }
 
     pub(super) fn on_reset(self: &Rc<Self>) {
+        self.end_jump_to_name();
         self.suppress_scroll_after_drop.set(false);
         self.pending_new_entry.take();
         if self.pending_properties.borrow().as_ref() != self.browser.location_at(0).as_ref() {

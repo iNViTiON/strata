@@ -443,6 +443,7 @@ fn new_view_state(parts: StateParts) -> Rc<ViewState> {
         preparing_transfers: RefCell::new(Vec::new()),
         drop_active_depths: Cell::new(None),
         find: RefCell::new(find::FindState::default()),
+        jump: jump_to_name::JumpState::new(),
         listing_filter: listing_filter::FilterState::default(),
         listing_search: listing_search::SearchState::default(),
         result_selection: result_selection::ResultSelection::default(),
@@ -685,6 +686,7 @@ impl BrowserView {
             interactive,
             browser,
         });
+        jump_to_name::bind(&state, &preferences);
         state.wire(&bar, &pending_submit);
 
         let view = Self { state };
