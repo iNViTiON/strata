@@ -17,6 +17,7 @@ fn cache_key(path: &str, modified: i64) -> PreviewCacheKey {
         pdf_page: None,
         model: None,
         route: None,
+        expanded: false,
     }
 }
 
@@ -25,6 +26,22 @@ fn pdf_page_key(page: i32, size: PdfRenderSize) -> PreviewCacheKey {
         pdf_page: Some((page, size)),
         ..cache_key("doc.pdf", 300)
     }
+}
+
+#[test]
+fn expanded_renders_are_cached_apart_from_standard_ones() {
+    let mut cache = empty_cache();
+    let key = |expanded| PreviewCacheKey {
+        expanded,
+        ..cache_key("photo.png", 1)
+    };
+    let standard = PreviewContent::Rasterized { png: vec![1] };
+    let expanded = PreviewContent::Rasterized { png: vec![2, 2] };
+    cache.insert(key(false), standard.clone());
+    assert_eq!(cache.get(&key(true)), None);
+    cache.insert(key(true), expanded.clone());
+    assert_eq!(cache.get(&key(false)), Some(standard));
+    assert_eq!(cache.get(&key(true)), Some(expanded));
 }
 
 fn pdf_page(png: Vec<u8>, page: i32, pages: i32) -> PreviewContent {

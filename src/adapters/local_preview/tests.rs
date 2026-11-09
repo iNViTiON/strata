@@ -49,6 +49,7 @@ fn preview_request(location: crate::model::Location, name: &str) -> PreviewReque
         render_document: false,
         pdf_page: 0,
         media_size: MediaPreviewSize::new(640, 800),
+        detail: Default::default(),
         model_palette: crate::services::ModelPalette::default(),
         model_view: Default::default(),
         archive_password: None,
