@@ -209,6 +209,9 @@ const RENDERS: &[(&[&str], Render)] = &[
     (&["preview-image", "document-image"], |request| {
         Ok(document_media::image(request.input, 800)?.into())
     }),
+    (&["preview-image-expanded"], |request| {
+        Ok(document_media::image(request.input, crate::sandbox::EXPANDED_IMAGE_EDGE)?.into())
+    }),
     (&["document-mermaid"], |request| {
         Ok(document_media::mermaid(request.input)?.into())
     }),

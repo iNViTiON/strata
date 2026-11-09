@@ -4,15 +4,17 @@ use super::*;
 
 mod pages;
 mod selection;
+pub(super) mod view;
 mod zoom;
 
 use selection::{LayerPoint, pdf_text_at, pdf_text_near};
 pub(super) use selection::{
     pdf_apply_ranges, pdf_desired_ranges, pdf_drop_unselected_layer, pdf_selected_text,
 };
+pub(super) use zoom::set_adjustment_value;
 use zoom::{
     pdf_page_width, pdf_zoom_after_scroll, preserve_pdf_view_center, resize_pdf_pages,
-    set_adjustment_value, set_pdf_page_texture,
+    set_pdf_page_texture,
 };
 
 type PdfPages = HashMap<i32, (gtk::Overlay, gtk::Picture, gtk::DrawingArea)>;
@@ -81,14 +83,21 @@ impl PreviewState {
         if let Some(layer) = first.text_layer {
             viewer.layers.borrow_mut().insert(first.page, layer);
         }
+        let render = Rc::new(Cell::new(view::PdfRender {
+            size: self.media_preview_size(),
+            detail: self.current_detail(),
+        }));
+        let next_request = Rc::new(Cell::new(self.next_request.get().saturating_add(10_000)));
+        let refine_loads = Rc::new(RefCell::new(HashMap::new()));
         let loader = Rc::new(pages::PageLoader {
             viewer: viewer.clone(),
             provider: self.provider.clone(),
             loads: self.pdf_loads.clone(),
-            entry,
-            render_size: self.media_preview_size(),
+            entry: entry.clone(),
+            render: render.clone(),
             initial: RefCell::new(Some((first.page, first.png))),
-            next_request: Cell::new(self.next_request.get().saturating_add(10_000)),
+            next_request: next_request.clone(),
+            refine_loads: refine_loads.clone(),
         });
         let factory = pages::page_factory(&loader);
 
@@ -105,7 +114,18 @@ impl PreviewState {
             .build();
 
         scroll.add_css_class("preview-pdf-scroll");
-        install_zoom(&scroll, &viewer);
+        let refine = view::page_refiner(
+            self.provider.clone(),
+            entry,
+            view::PageRefinement {
+                render: render.clone(),
+                next_request,
+                viewer: viewer.clone(),
+                loads: refine_loads,
+            },
+        );
+        let pdf_view = view::PdfView::new(&scroll, viewer.clone(), render, refine);
+        install_zoom(&scroll, &pdf_view);
         scroll.set_focusable(true);
         scroll.set_cursor_from_name(Some("grab"));
         install_pointer(&scroll, &viewer);
@@ -114,16 +134,16 @@ impl PreviewState {
             viewer.follow_width(scroll);
             glib::ControlFlow::Continue
         });
+        self.pdf_view.replace(Some(pdf_view));
         self.content.append(&scroll);
     }
 }
 
 /// Ctrl+scroll zooms around the view center; `pdf.reset-zoom` returns to fit.
-fn install_zoom(scroll: &gtk::ScrolledWindow, viewer: &Rc<PdfViewer>) {
+fn install_zoom(scroll: &gtk::ScrolledWindow, view: &view::PdfView) {
     let zoom_scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     zoom_scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let weak_scroll = scroll.downgrade();
-    let viewer_for_scroll = viewer.clone();
+    let view_for_scroll = view.clone();
     zoom_scroll.connect_scroll(move |controller, _, dy| {
         if !controller
             .current_event_state()
@@ -131,23 +151,14 @@ fn install_zoom(scroll: &gtk::ScrolledWindow, viewer: &Rc<PdfViewer>) {
         {
             return glib::Propagation::Proceed;
         }
-        if let Some(scroll) = weak_scroll.upgrade() {
-            viewer_for_scroll.zoom_by(&scroll, dy);
-        }
+        view_for_scroll.set_zoom(pdf_zoom_after_scroll(view_for_scroll.zoom(), dy));
         glib::Propagation::Stop
     });
     scroll.add_controller(zoom_scroll);
 
     let reset = gio::SimpleAction::new("reset-zoom", None);
-    let weak_scroll = scroll.downgrade();
-    let viewer = viewer.clone();
-    reset.connect_activate(move |_, _| {
-        let Some(scroll) = weak_scroll.upgrade() else {
-            return;
-        };
-        // No view-center correction: the list view re-anchors the visible page itself.
-        viewer.set_zoom(&scroll, PDF_MIN_ZOOM);
-    });
+    let view = view.clone();
+    reset.connect_activate(move |_, _| view.reset_zoom());
     let actions = gio::SimpleActionGroup::new();
     actions.add_action(&reset);
     scroll.insert_action_group("pdf", Some(&actions));
@@ -261,13 +272,6 @@ impl PdfViewer {
         self.page_width.set(width);
         resize_pdf_pages(&self.pages.borrow(), width);
         Some(previous)
-    }
-
-    fn zoom_by(&self, scroll: &gtk::ScrolledWindow, dy: f64) {
-        let next = pdf_zoom_after_scroll(self.zoom.get(), dy);
-        if let Some(previous) = self.set_zoom(scroll, next) {
-            preserve_pdf_view_center(scroll, next / previous);
-        }
     }
 
     fn follow_width(&self, scroll: &gtk::ScrolledWindow) {

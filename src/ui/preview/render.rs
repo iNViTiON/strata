@@ -155,17 +155,14 @@ impl PreviewState {
         let bytes = glib::Bytes::from_owned(png);
         match gtk::gdk::Texture::from_bytes(&bytes) {
             Ok(texture) => {
-                let picture = gtk::Picture::for_paintable(&texture);
+                let picture = zoom::ZoomPicture::new(&texture);
                 if let Some(label) = rasterized_label(entry) {
                     super::super::accessibility::set_label(&picture, &label);
                 }
                 picture.add_css_class("preview-image");
-                picture.set_can_shrink(true);
-                picture.set_content_fit(gtk::ContentFit::Contain);
-                picture.set_hexpand(true);
-                picture.set_vexpand(true);
                 picture.set_cursor_from_name(Some("grab"));
                 install_preview_drag(&picture, self);
+                self.zoom_view.replace(Some(picture.clone()));
                 self.content
                     .append(&media_layout::section(&picture, &texture));
             }
@@ -220,6 +217,9 @@ impl PreviewState {
         self.wrap.set_visible(false);
         self.text_view.take();
         self.text_scroll.take();
+        self.zoom_view.take();
+        self.pdf_view.take();
+        self.refine_load.borrow_mut().take();
         self.archive_browser.take();
         self.clear_password_entry();
         match (keep, audio, video) {

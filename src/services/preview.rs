@@ -22,10 +22,6 @@ pub enum PreviewDetail {
     #[default]
     Standard,
     /// `width` is the width of the larger presentation in device pixels.
-    #[expect(
-        dead_code,
-        reason = "presented by features that render larger than the drawer"
-    )]
     Expanded { width: i32 },
 }
 
@@ -39,20 +35,89 @@ impl PreviewDetail {
 pub struct MediaPreviewSize {
     pub width: i32,
     pub height: i32,
+    /// Sized for the expanded view: as large as it is shown, scaled more carefully.
+    pub expanded: bool,
+    /// The most frames per second to decode: 30 in the drawer, and up to the
+    /// screen's refresh rate (60) in the expanded view.
+    pub max_fps: u32,
 }
 
 impl MediaPreviewSize {
     pub const MAX_EDGE: i32 = 1280;
+    /// The most the expanded view ever asks for, so a huge display cannot demand
+    /// frames larger than the decoder pipe can carry.
+    pub const MAX_EXPANDED_EDGE: i32 = 3840;
+    const MAX_EXPANDED_PIXELS: i64 = 3840 * 2400;
 
     pub fn new(width: i32, height: i32) -> Self {
         Self {
             width: width.clamp(16, Self::MAX_EDGE),
             height: height.clamp(16, Self::MAX_EDGE),
+            expanded: false,
+            max_fps: 30,
+        }
+    }
+
+    pub fn expanded(width: i32, height: i32) -> Self {
+        let (mut width, mut height) = (
+            width.clamp(16, Self::MAX_EXPANDED_EDGE),
+            height.clamp(16, Self::MAX_EXPANDED_EDGE),
+        );
+        let pixels = i64::from(width) * i64::from(height);
+        if pixels > Self::MAX_EXPANDED_PIXELS {
+            let shrink = (Self::MAX_EXPANDED_PIXELS as f64 / pixels as f64).sqrt();
+            width = ((f64::from(width) * shrink) as i32).max(16);
+            height = ((f64::from(height) * shrink) as i32).max(16);
+        }
+        Self {
+            width,
+            height,
+            expanded: true,
+            max_fps: 60,
+        }
+    }
+
+    /// Never larger than the screen the view is on.
+    pub fn within(self, width: i32, height: i32) -> Self {
+        Self {
+            width: self.width.min(width.max(16)),
+            height: self.height.min(height.max(16)),
+            ..self
+        }
+    }
+
+    /// The expanded view asks for 60 frames per second only on a screen that
+    /// refreshes at least that fast.
+    pub fn for_refresh_rate(self, millihertz: i32) -> Self {
+        Self {
+            max_fps: if self.expanded && millihertz >= 55_000 {
+                60
+            } else {
+                30
+            },
+            ..self
         }
     }
 
     pub fn for_viewport(width: i32, height: i32, scale: i32) -> Self {
         Self::new(width.saturating_mul(scale), height.saturating_mul(scale))
+    }
+
+    pub fn for_expanded_viewport(width: i32, height: i32, scale: i32) -> Self {
+        Self::expanded(width.saturating_mul(scale), height.saturating_mul(scale))
+    }
+
+    /// The same request with its limits applied again, for values that crossed a
+    /// process boundary.
+    pub fn normalized(self) -> Self {
+        if self.expanded {
+            Self {
+                max_fps: if self.max_fps >= 60 { 60 } else { 30 },
+                ..Self::expanded(self.width, self.height)
+            }
+        } else {
+            Self::new(self.width, self.height)
+        }
     }
 }
 
