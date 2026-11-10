@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "%{keys} in sidebar",
   "%{keys} in the header": "%{keys} in the header",
   "%{keys} in the preview": "%{keys} in the preview",
+  "%{keys} in the expanded preview": "%{keys} in the expanded preview",
   "%{keys} in the sidebar": "%{keys} in the sidebar",
   "%{keys} on the Back button": "%{keys} on the Back button",
   "%{keys} in top bar": "%{keys} in top bar",

@@ -89,6 +89,13 @@ fn assert_seek_placement_follows_source_kind() {
     covered.cover = true;
     assert_omits_seek(&software_args(&covered, Track::Video));
     assert_input_seek(&software_args(&covered, Track::Audio), "1.000000");
+    let expanded = Input {
+        expanded: true,
+        ..sample_input(107850, false)
+    };
+    let args = software_args(&expanded, Track::Video).join(" ");
+    assert!(args.contains("flags=bilinear"), "{args}");
+    assert!(!args.contains("fast_bilinear"));
 }
 
 #[test]

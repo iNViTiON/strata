@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "%{keys} ở thanh bên",
   "%{keys} in the header": "%{keys} ở tiêu đề",
   "%{keys} in the preview": "%{keys} trong bản xem trước",
+  "%{keys} in the expanded preview": "%{keys} trong bản xem trước mở rộng",
   "%{keys} in the sidebar": "%{keys} ở thanh bên",
   "%{keys} on the Back button": "%{keys} trên nút Quay lại",
   "%{keys} in top bar": "%{keys} ở thanh trên cùng",

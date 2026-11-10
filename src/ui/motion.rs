@@ -17,8 +17,14 @@ pub(super) fn animations_enabled() -> bool {
             .unwrap_or(true)
 }
 
+/// Starts fast and settles slowly; for things that appear.
 pub(super) fn emphasized_deceleration(progress: f64) -> f64 {
     cubic_bezier(progress, (0.16, 1.0), (0.3, 1.0))
+}
+
+/// Eases in and out, for a surface that travels between two places.
+pub(super) fn emphasized(progress: f64) -> f64 {
+    cubic_bezier(progress, (0.2, 0.0), (0.0, 1.0))
 }
 
 /// The mirror of [`emphasized_deceleration`] for things leaving the screen:

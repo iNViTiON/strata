@@ -4,6 +4,9 @@ use super::*;
 
 impl PreviewState {
     pub(super) fn media_preview_size(&self) -> MediaPreviewSize {
+        if let Some(size) = self.expanded_media_size() {
+            return size;
+        }
         let split = self.split.borrow();
         let width = split
             .as_ref()
@@ -97,8 +100,10 @@ impl PreviewState {
         self.load_raw_details(&entry);
         self.show_identity(&entry);
         self.load.borrow_mut().take();
+        self.refine_load.borrow_mut().take();
         self.pdf_loads.borrow_mut().clear();
         let detail = self.current_detail();
+        self.loaded_detail.set(detail);
 
         let request_id = self.begin_request();
         self.retain_pending_playback(&entry);

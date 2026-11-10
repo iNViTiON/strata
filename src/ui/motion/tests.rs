@@ -17,3 +17,15 @@ fn emphasized_deceleration_is_monotonic_and_front_loaded() {
     assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
     assert!(emphasized_deceleration(0.5) > 0.8);
 }
+
+#[test]
+fn emphasized_starts_gently_and_ends_at_rest() {
+    assert!(emphasized(0.0).abs() < 0.0001);
+    assert!((emphasized(1.0) - 1.0).abs() < 0.0001);
+    let samples: Vec<_> = (0..=20)
+        .map(|sample| emphasized(f64::from(sample) / 20.0))
+        .collect();
+
+    assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert!(emphasized(0.1) < emphasized_deceleration(0.1));
+}

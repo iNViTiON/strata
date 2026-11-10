@@ -27,6 +27,7 @@ pub(super) mod chords;
 mod commands;
 mod direct;
 mod escape;
+mod expanded;
 mod files;
 mod focus;
 mod footer_bindings;
@@ -89,7 +90,17 @@ pub(super) fn install_on(
     let weak_browser = Rc::downgrade(&parts.view.browser());
     let preferences = parts.type_to_search.preferences.clone();
     let wheel_view = parts.view.downgrade();
-    let dispatcher = Rc::new(Dispatcher::bind(window, sidebar, parts, None));
+    let dispatcher = Dispatcher::bind(window, sidebar, parts, None);
+    dispatcher.preview.enable_expansion();
+    let dispatcher = Rc::new(dispatcher);
+    let weak_dispatcher = Rc::downgrade(&dispatcher);
+    dispatcher.preview.set_expanded_key_handler(move |press| {
+        weak_dispatcher
+            .upgrade()
+            .map_or(Propagation::Proceed, |dispatcher| {
+                dispatcher.expanded_window_key(press)
+            })
+    });
     submit_prompt_on_activate(&dispatcher, weak_browser.clone());
     descend_on_committed_slash(&dispatcher);
     connect_key_presses(&keys, root.as_ref(), dispatcher, weak_browser);
@@ -429,6 +440,9 @@ impl Dispatcher {
             return result;
         }
         if let Some(result) = self.input_owner(browser, press) {
+            return result;
+        }
+        if let Some(result) = self.expanded_preview(browser, press) {
             return result;
         }
         if let Some(result) =

@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "%{keys} az oldalsávban",
   "%{keys} in the header": "%{keys} a fejlécben",
   "%{keys} in the preview": "%{keys} az előnézetben",
+  "%{keys} in the expanded preview": "%{keys} a kibővített előnézetben",
   "%{keys} in the sidebar": "%{keys} az oldalsávban",
   "%{keys} on the Back button": "%{keys} a „Vissza” gombon",
   "%{keys} in top bar": "%{keys} a felső sávban",
