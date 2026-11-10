@@ -86,6 +86,10 @@ succeed. It executes `scripts/sign_update_manifest.py` from `github.workflow_sha
 the downloaded binaries. The later publishing job requires this job to succeed
 before tagging or publishing anything.
 
+The script signs the repository `lgse/strata` unless given `--repository owner/name`.
+A fork that publishes its own releases passes its own identity, which must equal
+the `REPOSITORY` the updater and installer verify.
+
 The `release-signing` GitHub environment must:
 
 1. Restrict deployments to the default branch (`main` today).
