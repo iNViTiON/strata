@@ -118,6 +118,7 @@ impl PreviewState {
         }
         if restored {
             self.resume_keyboard_claim();
+            self.preload.schedule();
         }
     }
 

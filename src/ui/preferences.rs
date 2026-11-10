@@ -292,6 +292,8 @@ pub(in crate::ui) struct Preferences {
     expanded_preview_style: ExpandedPreviewStyle,
     #[serde(default = "default_enabled")]
     expanded_preview_shift_controls: bool,
+    #[serde(default)]
+    preload_neighbor_previews: bool,
     #[serde(default = "crate::sandbox::browser::default_worker_limit")]
     thumbnail_workers: usize,
     #[serde(default = "default_enabled")]
