@@ -26,6 +26,7 @@ mod footer_prompt;
 mod go_prompt;
 mod icon_motion;
 mod jump_keys;
+mod jump_to_name;
 mod keymap_conflicts;
 mod keymap_overrides;
 mod letter_bookmarks;
@@ -192,6 +193,7 @@ fn seed_fixture_preferences() -> Rc<PreferenceManager> {
     preferences.set_sidebar_pinned_collapsed(false);
     preferences.set_sidebar_devices_collapsed(false);
     preferences.set_tenxer_mode(false);
+    preferences.set_typing_mode(crate::ui::preferences::TypingMode::VimKeys);
     preferences
 }
 

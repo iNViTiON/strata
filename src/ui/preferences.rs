@@ -124,6 +124,15 @@ pub(crate) enum UnitSystem {
     Imperial,
 }
 
+/// What plain letters do in the file list while Type to search is off.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TypingMode {
+    #[default]
+    VimKeys,
+    JumpToName,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub(in crate::ui) struct Preferences {
     mode: String,
@@ -157,6 +166,8 @@ pub(in crate::ui) struct Preferences {
     search_entry_limit: u32,
     #[serde(default = "default_enabled")]
     type_to_search: bool,
+    #[serde(default)]
+    typing_mode: TypingMode,
     #[serde(default)]
     arrow_navigation_scoped: bool,
     #[serde(default)]
