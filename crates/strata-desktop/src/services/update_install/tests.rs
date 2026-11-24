@@ -472,7 +472,7 @@ fn request(tag: &str, asset: &str, advertised: &str) -> InstallRequest {
 const TAG: &str = "v0.11.2";
 
 fn release_url(tag: &str, asset: &str) -> String {
-    format!("https://github.com/lgse/strata/releases/download/{tag}/{asset}")
+    format!("https://github.com/iNViTiON/strata/releases/download/{tag}/{asset}")
 }
 
 #[test]
@@ -491,7 +491,7 @@ fn download_url_rejects_untrusted_locations_and_escaping_identities() {
     let expected = release_url(TAG, &asset);
     for advertised in [
         expected.replace("github.com", "example.invalid"),
-        expected.replace("lgse/strata", "attacker/strata"),
+        expected.replace("iNViTiON/strata", "attacker/strata"),
         expected.replace("https://", "http://"),
         release_url("v0.11.1", &asset),
         release_url(TAG, "unexpected.debug"),

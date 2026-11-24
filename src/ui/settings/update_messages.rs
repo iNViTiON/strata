@@ -81,6 +81,6 @@ pub(super) fn update_check_message(result: &UpdateCheck, update_method: UpdateMe
             }
             .into_owned()
         }
-        UpdateCheck::Failed(message) => rust_i18n::t!("Couldn't check for updates: %{value1} · <a href=\"https://github.com/lgse/strata/releases/latest\">View releases on GitHub</a>", value1 = glib::markup_escape_text(message)).into_owned(),
+        UpdateCheck::Failed(message) => rust_i18n::t!("Couldn't check for updates: %{value1} · <a href=\"https://github.com/iNViTiON/strata/releases/latest\">View releases on GitHub</a>", value1 = glib::markup_escape_text(message)).into_owned(),
     }
 }
