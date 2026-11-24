@@ -25,6 +25,7 @@ mod icons_cell;
 mod inline_search;
 mod input_ownership;
 mod jobs;
+mod jump_to_name;
 mod keys;
 pub(crate) mod launch_context;
 mod loading_skeleton;

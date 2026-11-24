@@ -24,6 +24,7 @@ const PRESSED_STAGES: &[Stage] = &[
     ChooserShortcuts::reference_keeps_key,
     ChooserShortcuts::folder_menu_keeps_key,
     ChooserShortcuts::back_history_keeps_key,
+    ChooserShortcuts::jump_to_name,
     ChooserShortcuts::context_menu,
     ChooserShortcuts::video_key,
     ChooserShortcuts::filtered_rows_navigate,

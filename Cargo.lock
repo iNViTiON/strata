@@ -3038,6 +3038,7 @@ dependencies = [
  "tempfile",
  "toml 1.2.2+spec-1.1.0",
  "tracing",
+ "unicode-normalization",
  "wayland-client",
  "wayland-protocols-misc",
  "wayland-protocols-wlr",

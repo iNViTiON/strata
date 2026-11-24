@@ -82,6 +82,15 @@ impl PreferenceManager {
         self.save_preferences();
     }
 
+    pub(crate) fn typing_mode(&self) -> TypingMode {
+        self.preferences.borrow().typing_mode
+    }
+
+    pub(crate) fn set_typing_mode(&self, mode: TypingMode) {
+        self.preferences.borrow_mut().typing_mode = mode;
+        self.save_preferences();
+    }
+
     pub fn arrow_navigation_scoped(&self) -> bool {
         self.preferences.borrow().arrow_navigation_scoped
     }

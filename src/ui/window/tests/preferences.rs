@@ -467,3 +467,46 @@ fn loaded_entry(open: &OpenWindow, path: &std::path::Path) -> crate::model::File
     wait_until(|| find().is_some());
     find().expect("loaded entry")
 }
+
+fn choice_named(root: &impl gtk::prelude::IsA<gtk::Widget>, title: &str) -> gtk::MenuButton {
+    let label = label_named(root.upcast_ref(), title);
+    let mut current = label.parent();
+    while let Some(widget) = current {
+        let mut found = None;
+        walk(&widget, &mut |child| {
+            if found.is_none()
+                && let Some(button) = child.downcast_ref::<gtk::MenuButton>()
+            {
+                found = Some(button.clone());
+            }
+        });
+        if let Some(button) = found {
+            return button;
+        }
+        current = widget.parent();
+    }
+    panic!("choice {title}");
+}
+
+fn choose_option(choice: &gtk::MenuButton, label: &str) {
+    let popover = choice.popover().expect("choice popover");
+    let mut option = None;
+    walk(popover.upcast_ref(), &mut |widget| {
+        if option.is_none()
+            && let Some(button) = widget.downcast_ref::<gtk::Button>()
+        {
+            let mut labelled = false;
+            walk(button.upcast_ref(), &mut |child| {
+                labelled |= child
+                    .downcast_ref::<gtk::Label>()
+                    .is_some_and(|candidate| candidate.text() == label);
+            });
+            if labelled {
+                option = Some(button.clone());
+            }
+        }
+    });
+    option
+        .unwrap_or_else(|| panic!("option {label}"))
+        .emit_clicked();
+}

@@ -161,6 +161,7 @@ xkbcommon = { version = "0.9.0", default-features = false, optional = true }
 
 [dev-dependencies]
 strata-test-support.workspace = true
+unicode-normalization.workspace = true
 
 [[test]]
 name = "qa"
