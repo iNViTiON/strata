@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "%{keys}（側邊欄）",
   "%{keys} in the header": "%{keys}（標題列中）",
   "%{keys} in the preview": "%{keys}（預覽中）",
+  "%{keys} in the expanded preview": "%{keys}（展開預覽中）",
   "%{keys} in the sidebar": "%{keys}（側邊欄中）",
   "%{keys} on the Back button": "在「上一頁」按鈕上按 %{keys}",
   "%{keys} in top bar": "%{keys}（頂端列）",

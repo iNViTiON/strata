@@ -40,6 +40,7 @@ mod components;
 mod document;
 mod drawer;
 mod ease_in;
+mod expanded;
 mod feedback;
 mod find;
 mod keyboard;
@@ -65,6 +66,7 @@ use media_session::{
 };
 #[cfg(test)]
 use pdf::{pdf_apply_ranges, pdf_desired_ranges, pdf_drop_unselected_layer, pdf_selected_text};
+use pdf::{set_adjustment_value, view as pdf_view};
 use source_view::{PendingSourcePreview, SourcePreviewView};
 pub(in crate::ui) mod media_layout;
 mod model;
@@ -77,6 +79,7 @@ mod route;
 mod session;
 pub(super) mod video;
 mod waveform;
+mod zoom;
 
 pub(in crate::ui) const DEFAULT_WIDTH: i32 = 520;
 pub(in crate::ui) const MIN_WIDTH: i32 = 240;
@@ -177,6 +180,13 @@ struct PreviewState {
     open: gtk::Button,
     allow_external_open: bool,
     wrap: gtk::ToggleButton,
+    expand_button: gtk::Button,
+    expand_icon: gtk::Image,
+    expanded: expanded::ExpandedState,
+    zoom_view: RefCell<Option<zoom::ZoomPicture>>,
+    pdf_view: RefCell<Option<pdf_view::PdfView>>,
+    loaded_detail: Cell<PreviewDetail>,
+    refine_load: RefCell<Option<LoadHandle>>,
     text_view: RefCell<Option<sourceview5::View>>,
     text_scroll: RefCell<Option<gtk::ScrolledWindow>>,
     archive_browser: RefCell<Option<archive::ArchiveBrowser>>,
@@ -219,6 +229,7 @@ struct PreviewState {
     operations: RefCell<Option<file_activity::Subscription>>,
 }
 
+pub(in crate::ui) use expanded::{PreviewArrow, ZoomStep};
 use keyboard::MediaSeek;
 pub(in crate::ui) use keyboard::{
     ArchiveMove, DocumentScroll, MediaCommand, PreviewSurface, media_key_command,

@@ -46,6 +46,9 @@ impl PreviewDrawer {
         install_preview_drag(&header.handle, &state);
         state.install_keyboard_ownership();
         state.install_find();
+        state.install_expand_button();
+        state.install_presentation_refinement();
+        state.sync_expand_button();
         let weak = Rc::downgrade(&state);
         header.document_view_button.connect_clicked(move |_| {
             if let Some(state) = weak.upgrade() {
@@ -54,7 +57,9 @@ impl PreviewDrawer {
         });
         let weak = Rc::downgrade(&state);
         state.pane.connect_unrealize(move |_| {
-            if let Some(state) = weak.upgrade() {
+            if let Some(state) = weak.upgrade()
+                && !state.expanded.is_relocating()
+            {
                 state.stop();
             }
         });
@@ -300,6 +305,13 @@ impl PreviewState {
             open: header.open.clone(),
             allow_external_open: parts.allow_external_open,
             wrap: header.wrap.clone(),
+            expand_button: header.expand_button.clone(),
+            expand_icon: header.expand_icon.clone(),
+            expanded: expanded::ExpandedState::default(),
+            zoom_view: RefCell::new(None),
+            pdf_view: RefCell::new(None),
+            loaded_detail: Cell::new(PreviewDetail::Standard),
+            refine_load: RefCell::new(None),
             text_view: RefCell::new(None),
             text_scroll: RefCell::new(None),
             archive_browser: RefCell::new(None),

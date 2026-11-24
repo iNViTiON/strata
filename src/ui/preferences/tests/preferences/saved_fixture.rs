@@ -244,6 +244,14 @@ fn assert_saved_previews(manager: &PreferenceManager) {
     );
     assert_eq!(
         (
+            manager.expanded_preview_style(),
+            manager.expanded_preview_shift_controls(),
+        ),
+        (ExpandedPreviewStyle::Fullscreen, false),
+        "(expanded preview style, expanded preview shift controls)"
+    );
+    assert_eq!(
+        (
             manager.watch_network_folders(),
             manager.thumbnail_workers(),
             manager.show_thumbnails(),

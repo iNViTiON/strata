@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use super::{MEDIA_PREVIEW, PDF_PREVIEW, assert_validity};
-use crate::sandbox::{OutputError, ParseOperation, archive_output_error};
+use crate::sandbox::{OutputError, ParseOperation, PdfRenderSize, archive_output_error};
 
 fn png(width: u32, height: u32) -> Vec<u8> {
     let mut data = b"\x89PNG\r\n\x1a\n".to_vec();
@@ -112,6 +112,16 @@ fn accepts_only_bounded_png_outputs_and_never_compressed_media() {
             (b"\x89PNG\r\n\x1a\n", false),
         ],
     );
+    let edge = crate::sandbox::EXPANDED_IMAGE_EDGE;
+    assert_validity(
+        &ParseOperation::PreviewImageExpanded,
+        &[(&png(edge, edge), true), (&png(edge + 1, 1), false)],
+    );
+    assert_validity(
+        &ParseOperation::PreviewPdf(PdfRenderSize::new_expanded(2_400, 3_200)),
+        &[(&png(2_400, 3_200), true), (&png(2_401, 1), false)],
+    );
+    assert_validity(&PDF_PREVIEW, &[(&png(1_400, 1_800), false)]);
     assert_validity(
         &PDF_PREVIEW,
         &[

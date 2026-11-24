@@ -14,6 +14,8 @@ pub(super) struct Header {
     pub(super) document_view_icon: gtk::Image,
     pub(super) document_view_button: gtk::Button,
     pub(super) wrap: gtk::ToggleButton,
+    pub(super) expand_button: gtk::Button,
+    pub(super) expand_icon: gtk::Image,
     pub(super) close: gtk::Button,
     pub(super) find_button: gtk::Button,
 }
@@ -36,6 +38,8 @@ impl Header {
         let document_view_icon = crate::assets::primary_icon(crate::assets::icons::FILE_CODE, 16);
         let document_view_button = document_view_button(&document_view_icon);
         let wrap = wrap_button();
+        let expand_icon = crate::assets::chrome_icon(crate::assets::icons::MAXIMIZE_2);
+        let expand_button = expand_button(&expand_icon);
         let close = close_button();
         let handle = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         handle.add_css_class("preview-header-handle");
@@ -58,6 +62,7 @@ impl Header {
         row.append(&model_spinner);
         row.append(&open);
         row.append(&wrap);
+        row.append(&expand_button);
         row.append(&close);
         Self {
             row,
@@ -70,6 +75,8 @@ impl Header {
             document_view_icon,
             document_view_button,
             wrap,
+            expand_button,
+            expand_icon,
             close,
             find_button,
         }
@@ -158,6 +165,16 @@ fn wrap_button() -> gtk::ToggleButton {
     wrap.add_css_class("preview-header-action");
     wrap.set_visible(false);
     wrap
+}
+
+fn expand_button(icon: &gtk::Image) -> gtk::Button {
+    let button = gtk::Button::builder()
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    button.set_child(Some(icon));
+    button.add_css_class("preview-header-action");
+    button
 }
 
 fn close_button() -> gtk::Button {

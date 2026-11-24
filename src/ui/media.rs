@@ -18,12 +18,14 @@ pub(crate) mod ambient;
 mod audio;
 #[cfg(debug_assertions)]
 mod diagnostics;
+mod handover;
 mod history;
 mod playback;
 mod positions;
 #[cfg(test)]
 mod tests;
 use audio::PcmOutput;
+use handover::Handover;
 use history::PcmHistory;
 use positions::recall_media_position;
 pub(crate) use positions::resume_position;
@@ -51,6 +53,16 @@ pub(crate) fn use_test_streams(enabled: bool) {
     TEST_STREAMS.with(|streams| streams.set(enabled));
 }
 
+/// A decoded frame with the size and frame rate of the decoder it came from,
+/// since a handover changes both while older frames are still queued.
+pub(super) struct QueuedFrame {
+    frame: Frame,
+    width: u32,
+    height: u32,
+    /// The rate the frame's tick counts in, which a handover can change.
+    fps: u32,
+}
+
 #[cfg(test)]
 type TestLoader = std::rc::Rc<dyn Fn(SandboxedMedia, u32) -> Result<Session, String>>;
 
@@ -70,7 +82,14 @@ mod imp {
         pub(super) header: Cell<Option<Header>>,
         pub(super) loaded_size: Cell<Option<MediaPreviewSize>>,
         pub(super) texture: RefCell<Option<gdk::Texture>>,
-        pub(super) frames: RefCell<VecDeque<Frame>>,
+        pub(super) frames: RefCell<VecDeque<QueuedFrame>>,
+        pub(super) handover: RefCell<Option<Handover>>,
+        /// The point in the media, as a count of 48 kHz audio samples, that the
+        /// playback clock and the audio timeline count from. Samples keep it
+        /// exact: the audio output checks timestamps to the sample.
+        pub(super) origin_samples: Cell<u64>,
+        pub(super) last_tick: Cell<Option<u32>>,
+        pub(super) start_latency: Cell<Option<Duration>>,
         pub(super) audio: RefCell<Option<PcmOutput>>,
         pub(super) timer: RefCell<Option<glib::SourceId>>,
         pub(super) closed: Cell<bool>,
@@ -91,7 +110,6 @@ mod imp {
         pub(super) recoveries: Cell<u32>,
         pub(super) audio_stuck_since: Cell<Option<Instant>>,
         pub(super) audio_anchored: Cell<bool>,
-        pub(super) audio_chunks: Cell<u32>,
         pub(super) restore: Cell<Option<u64>>,
         pub(super) start_percent: Cell<u32>,
         pub(super) start_requested: Cell<bool>,
@@ -332,6 +350,8 @@ impl DecodedMedia {
                 audio: false,
                 duration_us: 60_000_000,
                 start_tick: tick,
+                fps: media::FPS,
+                native_fps: media::FPS,
             })
         })));
     }
@@ -352,6 +372,8 @@ impl DecodedMedia {
                     audio: true,
                     duration_us,
                     start_tick: tick,
+                    fps: media::FPS,
+                    native_fps: media::FPS,
                 })
             })));
     }
@@ -365,17 +387,23 @@ impl DecodedMedia {
             audio: false,
             duration_us: 10_000_000,
             start_tick: 0,
+            fps: media::FPS,
+            native_fps: media::FPS,
         });
         imp.header.set(Some(header));
         if !self.is_prepared() {
             self.stream_prepared(false, true, true, header.duration_us as i64);
         }
         imp.first_frame.set(true);
-        self.present(Frame {
-            tick: header.start_tick,
-            pixels: vec![0; header.video_bytes()],
-            samples: Vec::new(),
-        });
+        self.present(
+            Frame {
+                tick: header.start_tick,
+                pixels: vec![0; header.video_bytes()],
+                samples: Vec::new(),
+            },
+            header.width,
+            header.height,
+        );
     }
 
     fn ensure_timer(&self) {
@@ -433,6 +461,7 @@ impl DecodedMedia {
             timer.remove();
         }
         imp.session.borrow_mut().take();
+        imp.handover.borrow_mut().take();
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         imp.texture.borrow_mut().take();
@@ -474,6 +503,8 @@ impl DecodedMedia {
         if let Some(session) = imp.session.borrow().as_ref() {
             session.cancel();
         }
+        imp.handover.borrow_mut().take();
+        imp.last_tick.set(None);
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         if let Some(history) = imp.history.borrow_mut().as_mut() {
@@ -486,7 +517,6 @@ impl DecodedMedia {
         imp.clock_base.set(0);
         imp.audio_stuck_since.set(None);
         imp.audio_anchored.set(false);
-        imp.audio_chunks.set(0);
         imp.first_frame.set(false);
         imp.end.set(None);
         imp.dormant.set(false);
@@ -498,6 +528,7 @@ impl DecodedMedia {
     fn fail(&self, message: &str) {
         let imp = self.imp();
         imp.session.borrow_mut().take();
+        imp.handover.borrow_mut().take();
         imp.audio.borrow_mut().take();
         imp.frames.borrow_mut().clear();
         if self.is_seeking() {
@@ -506,5 +537,15 @@ impl DecodedMedia {
         if self.error().is_none() {
             self.set_error(glib::Error::new(gio::IOErrorEnum::Failed, message));
         }
+    }
+}
+
+/// The frame rate a request wants for a picture like `header`'s: the drawer's,
+/// or in the expanded view the source's own, as far as the screen shows it.
+fn wanted_fps(size: MediaPreviewSize, header: Header) -> u32 {
+    if size.expanded {
+        media::frame_rate_for(header.width, header.height, header.native_fps, size.max_fps)
+    } else {
+        media::FPS
     }
 }

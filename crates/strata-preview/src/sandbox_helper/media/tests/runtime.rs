@@ -185,8 +185,8 @@ fn media_runtime_overrides_decode_without_prlimit_or_nice_on_path() {
     let runtime = Runtime::new();
     let priority = rustix::process::getpriority_process(None).expect("test priority");
     for (operation, value, magic, background) in [
-        ("preview-media", "64x48", b"STRRAW01", false),
-        ("preview-audio", "64x48", b"STRRAW01", false),
+        ("preview-media", "64x48", b"STRRAW02", false),
+        ("preview-audio", "64x48", b"STRRAW02", false),
         ("audio-peaks", "0", b"STRPEAK1", true),
         ("video-storyboard", "64", b"STRSTB01", true),
         ("audio-cover", "64", b"\x89PNG\r\n\x1a\n", false),

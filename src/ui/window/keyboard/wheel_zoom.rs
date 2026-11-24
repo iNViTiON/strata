@@ -166,6 +166,7 @@ fn zoom_by(preferences: &PreferenceManager, view: &BrowserView, thumbnails: bool
 }
 
 fn inside_pdf_scroll(widget: &gtk::Widget) -> bool {
-    std::iter::successors(Some(widget.clone()), gtk::Widget::parent)
-        .any(|widget| widget.has_css_class("preview-pdf-scroll"))
+    std::iter::successors(Some(widget.clone()), gtk::Widget::parent).any(|widget| {
+        widget.has_css_class("preview-pdf-scroll") || widget.has_css_class("preview-zoom")
+    })
 }

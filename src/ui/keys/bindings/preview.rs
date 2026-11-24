@@ -14,6 +14,12 @@ catalog! {
         MEDIA_MUTE: Command "media_mute" = Binding::ctrl_alt(Key::m);
         MEDIA_PREVIOUS: Command "media_previous" = Binding::ctrl_alt(Key::less);
         MEDIA_NEXT: Command "media_next" = Binding::ctrl_alt(Key::greater);
+
+        EXPAND_PREVIEW: Binding = Binding::shift(Key::space);
+        EXPANDED_ZOOM_IN: Binding = Binding::plain(Key::plus).ignoring(Modifiers::SHIFT_MASK);
+        EXPANDED_ZOOM_OUT: Binding = Binding::plain(Key::minus).ignoring(Modifiers::SHIFT_MASK);
+        // AZERTY types 0 with Shift.
+        EXPANDED_ZOOM_FIT: Binding = Binding::plain(Key::_0).ignoring(Modifiers::SHIFT_MASK);
     }
     tenxer_only {
         // Without Ctrl+Alt, where the preview shows audio or video.
@@ -42,6 +48,8 @@ catalog! {
     unlisted {
         PDF_ZOOM_RESET: Command "pdf_zoom_reset" = Binding::ctrl(Key::_0), live in both;
         PREVIOUS_MATCH: Command "previous_match" = Binding::shift(Key::Return), live in both;
+        EXPANDED_ZOOM_IN_EQUAL: Binding = Binding::plain(Key::equal).ignoring(Modifiers::SHIFT_MASK);
+        EXPANDED_MUTE: Binding = Binding::plain(Key::m);
 
         // GTK's own text keys, which a focused document keeps.
         DOCUMENT_START: Binding = Binding::ctrl(Key::Home);

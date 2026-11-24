@@ -63,6 +63,7 @@
   "%{keys} in sidebar": "사이드바에서 %{keys}",
   "%{keys} in the header": "헤더에서 %{keys}",
   "%{keys} in the preview": "미리 보기에서 %{keys}",
+  "%{keys} in the expanded preview": "확대 미리 보기에서 %{keys}",
   "%{keys} in the sidebar": "사이드바에서 %{keys}",
   "%{keys} on the Back button": "뒤로 버튼에서 %{keys}",
   "%{keys} in top bar": "상단 표시줄에서 %{keys}",

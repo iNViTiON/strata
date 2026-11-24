@@ -40,8 +40,8 @@ use command::{SandboxCommand, runtime_command, sandbox_command};
 pub use command::{gpu_devices, numbered_name, polaris_gpu_available, sandbox_tool};
 pub use decoders::decodes_animated_webp;
 pub use operation::{
-    CoverFormat, DocumentFormat, MediaPreviewBackend, PDF_PASSWORD_PROTECTED, ParseOperation,
-    PdfPreviewError, PdfRenderSize,
+    CoverFormat, DocumentFormat, EXPANDED_IMAGE_EDGE, MediaPreviewBackend, PDF_PASSWORD_PROTECTED,
+    ParseOperation, PdfPreviewError, PdfRenderSize,
 };
 pub use output::png_dimensions;
 #[cfg(test)]
