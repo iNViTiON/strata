@@ -116,6 +116,15 @@ impl PreferenceManager {
         self.save_preferences();
     }
 
+    pub fn preload_neighbor_previews(&self) -> bool {
+        self.preferences.borrow().preload_neighbor_previews
+    }
+
+    pub fn set_preload_neighbor_previews(&self, enabled: bool) {
+        self.preferences.borrow_mut().preload_neighbor_previews = enabled;
+        self.save_preferences();
+    }
+
     /// Percent of the duration a first-time video preview starts at.
     pub fn preview_video_start(&self) -> u32 {
         self.preferences.borrow().preview_video_start

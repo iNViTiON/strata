@@ -10,6 +10,7 @@ use gtk::{gdk, glib, prelude::*, subclass::prelude::*};
 use crate::{
     media::{self, Frame, Header, Packet},
     sandbox::media::{Event, Session},
+    services::SandboxedMedia,
 };
 
 use super::{
@@ -157,13 +158,20 @@ impl DecodedMedia {
             .cloned()
             .ok_or("Preview closed")?;
         let size = source.size;
+        let start = |source: SandboxedMedia| {
+            if imp.parked.get() {
+                Session::start_preload(source, tick)
+            } else {
+                Session::start(source, tick)
+            }
+        };
         #[cfg(test)]
         let started = match imp.loader.borrow().as_ref() {
             Some(loader) => loader(source, tick),
-            None => Session::start(source, tick),
+            None => start(source),
         };
         #[cfg(not(test))]
-        let started = Session::start(source, tick);
+        let started = start(source);
         match started {
             Ok(session) => {
                 imp.session.replace(Some(session));
@@ -184,15 +192,35 @@ impl DecodedMedia {
         }
     }
 
+    fn flush_parked_samples(&self) -> Result<(), String> {
+        let imp = self.imp();
+        let Some(header) = imp.header.get() else {
+            return Ok(());
+        };
+        let audio = imp.audio.borrow();
+        let Some(audio) = audio.as_ref().filter(|audio| audio.has_capacity()) else {
+            return Ok(());
+        };
+        match imp.parked_samples.take() {
+            Some(samples) => self.push_audio(audio, &header, header.start_tick, samples),
+            None => Ok(()),
+        }
+    }
+
     fn pump_events(&self) -> Result<ControlFlow<()>, String> {
         let imp = self.imp();
+        self.flush_parked_samples()?;
         while imp.end.get().is_none() && self.can_queue_more() {
             let event = imp.session.borrow().as_ref().and_then(Session::receive);
             let next = match event {
                 Some(Event::Prepared(header)) => self.on_prepared(header)?,
                 Some(Event::Packet(Packet::Frame(frame))) => {
                     self.accept_frame(frame)?;
-                    Pump::Continue
+                    if imp.parked.get() {
+                        Pump::Drained
+                    } else {
+                        Pump::Continue
+                    }
                 }
                 Some(Event::Packet(Packet::End(duration))) => {
                     self.on_end(duration)?;
@@ -231,7 +259,9 @@ impl DecodedMedia {
             self.restart_at(position);
             return Ok(Pump::Drained);
         }
-        let audio = header.audio.then(|| self.pcm_output()).transpose()?;
+        let audio = (header.audio && !imp.parked.get())
+            .then(|| self.pcm_output())
+            .transpose()?;
         imp.audio.replace(audio);
         imp.header.set(Some(header));
         self.invalidate_size();
@@ -343,7 +373,7 @@ impl DecodedMedia {
         Ok(())
     }
 
-    fn present_first_frame(&self, frame: Frame, header: &Header) {
+    fn present_first_frame(&self, mut frame: Frame, header: &Header) {
         let imp = self.imp();
         let latency = imp.starting.get().map(|time| time.elapsed());
         imp.first_frame.set(true);
@@ -357,8 +387,13 @@ impl DecodedMedia {
                 audio.play();
             }
         }
+        if imp.parked.get() {
+            imp.parked_samples
+                .replace(Some(std::mem::take(&mut frame.samples)));
+        }
         self.present(frame, header.width, header.height);
         tracing::debug!(
+            parked = imp.parked.get(),
             latency_ms = latency.map_or(0, |latency| latency.as_millis() as u64),
             position_us = media::timestamp_at(header.start_tick, header.fps),
             width = header.width,
@@ -629,6 +664,7 @@ impl DecodedMedia {
             return true;
         };
         match imp.audio.borrow().as_ref() {
+            Some(_) if imp.parked_samples.borrow().is_some() => false,
             Some(audio) => {
                 audio.has_capacity() && (header.width == 0 || frames < PRESENTATION_QUEUE)
             }
@@ -636,7 +672,7 @@ impl DecodedMedia {
         }
     }
 
-    fn pcm_output(&self) -> Result<PcmOutput, String> {
+    pub(super) fn pcm_output(&self) -> Result<PcmOutput, String> {
         #[cfg(test)]
         let output = if let Some(description) = self.imp().audio_sink.borrow().as_deref() {
             PcmOutput::test_sink(
