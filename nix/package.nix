@@ -120,16 +120,17 @@ craneLib.buildPackage {
   # where libva loads its VA-API driver from and the sandbox does not otherwise
   # look.
   postPatch = ''
-    substituteInPlace src/sandbox/command.rs \
+    sandbox=crates/strata-preview/src/sandbox
+    substituteInPlace $sandbox/command.rs \
       --replace-fail '"/app",' '"/app", "--ro-bind-try", "/run/opengl-driver", "/run/opengl-driver",'
-    substituteInPlace src/sandbox.rs src/sandbox/archive.rs src/sandbox/media.rs src/sandbox/browser.rs \
-      --replace-fail 'crate::trusted_command::resolve("bwrap")' '${bwrap}'
+    substituteInPlace $sandbox.rs $sandbox/archive.rs $sandbox/media.rs $sandbox/browser.rs \
+      --replace-fail 'crate::trusted_command::resolve_unprivileged("bwrap")' '${bwrap}'
 
     # --replace-fail misses call sites added upstream later, and a hardcoded
     # path bypasses the build-time variables. runtime.rs holds the FHS defaults
     # those variables override and the launch-time root allow-list.
     if grep -rnE --include='*.rs' --exclude=tests.rs --exclude=runtime.rs --exclude-dir=tests \
-      '\.arg\("/usr/bin/prlimit"\)|resolve\("bwrap"\)|"/usr/bin",|"/usr",' src/sandbox.rs src/sandbox; then
+      '\.arg\("/usr/bin/prlimit"\)|resolve(_unprivileged)?\("bwrap"\)|"/usr/bin",|"/usr",' $sandbox.rs $sandbox; then
       echo "error: unpatched FHS sandbox paths remain; extend postPatch" >&2
       exit 1
     fi

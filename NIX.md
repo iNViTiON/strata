@@ -178,7 +178,7 @@ toolchain profile: with `rust-src`, std's panic locations would keep the whole
 toolchain in the closure (`disallowedReferences` guards this). It is based on
 Th1nkK1D's package (credit and MIT notice in `nix/package.nix`). The
 patches point the preview sandbox at the store instead of `/usr` in every
-`src/sandbox*` call site, pin `bwrap` and `prlimit`, give the helpers a store
+`crates/strata-preview/src/sandbox*` call site, pin `bwrap` and `prlimit`, give the helpers a store
 `PATH`, and bind `/run/opengl-driver` so VA-API works in the sandbox. Each
 uses `--replace-fail`, so an upstream change to those lines fails the build
 instead of silently dropping a patch. UnRAR is statically linked and unfree;
