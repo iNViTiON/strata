@@ -310,6 +310,7 @@ impl PreviewState {
             media_toggle_mute: RefCell::new(None),
             split: RefCell::new(None),
             sizing: layout::SplitSizing::default(),
+            presentation: presentation::Listeners::default(),
             current: RefCell::new(None),
             current_depth: Cell::new(None),
             pending_show: RefCell::new(None),

@@ -125,6 +125,8 @@ struct PreviewCacheKey {
     pdf_page: Option<(i32, PdfRenderSize)>,
     model: Option<ModelRender>,
     route: Option<RouteRender>,
+    /// PDF pages already key their render size; images differ only by this.
+    expanded: bool,
 }
 
 impl PreviewCache {
